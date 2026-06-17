@@ -918,7 +918,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for d in [account_stats, account_stop_flags, account_spam_tasks, account_clients]:
             if aid in d:
                 del d[aid]
-        await query.edit_message_text(f"✅ **{name}** deleted!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineButton("🔙 Back", callback_data="m_acc")]]))
+        await query.edit_message_text(f"✅ **{name}** deleted!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
     elif data == "ac_bk":
         ba = get_backup_accounts()
         txt = f"💾 **Backup Accounts**\nTotal: {len(ba)}\n\nAuto-used when main account gets banned.\n\n"
@@ -1010,11 +1010,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("➕ **Enter user ID:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
     elif data == "ad_del" and user_id == OWNER_ID:
         if len(admins) <= 1:
-            await query.edit_message_text("❌ Only owner left!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
-            return
-        kb = [[InlineKeyboardButton(f"🗑 `{a}`", callback_data=f"addc_{a}")] for a in admins if a != OWNER_ID]
-        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_adm")])
-        await query.edit_message_text("🗑 **Select to remove:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+            await query.edit_message_text("🗑 **Select to remove:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
     elif data.startswith("addc_") and user_id == OWNER_ID:
         aid = int(data.split('_')[1])
         if aid in admins and aid != OWNER_ID:
@@ -1135,4 +1131,121 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Already admin!")
         except:
             await update.message.reply_text("❌ Valid ID pls!")
+        context.user_data['await'] = None
+    elif aw == 'ac_ph':
+        phone = text.strip()
+        if not phone.startswith('+'):
+            phone = '+' + phone
+        context.user_data['ac_ph'] = phone
+        context.user_data['await'] = 'ac_otp'
+        try:
+            client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH, receive_updates=False)
+            await client.connect()
+            await client.send_code_request(phone)
+            context.user_data['ac_cl'] = client
+            await update.message.reply_text(f"📱 OTP sent to `{phone}`\n\n**Enter OTP:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+        except Exception as e:
+            await update.message.reply_text(f"❌ {str(e)[:80]}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+            context.user_data['await'] = None
+    elif aw == 'ac_otp':
+        code = text.strip()
+        phone = context.user_data.get('ac_ph', '')
+        client = context.user_data.get('ac_cl')
+        if not client:
+            await update.message.reply_text("❌ Session expired!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+            context.user_data['await'] = None
+            return
+        if context.user_data.get('ac_2fa'):
+            try:
+                await client.sign_in(password=code)
+                me = await client.get_me()
+                ss = client.session.save()
+                info = {'id': gen_acc_id(), 'user_id': me.id, 'name': me.first_name or f"User{me.id}", 'phone': getattr(me, 'phone', phone), 'session': ss, 'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH, 'enabled': True, 'mode': 'ai', 'spam_active': False, 'proxy': None, 'is_backup': False, 'added_at': datetime.now().isoformat()}
+                add_account_data(info)
+                c2 = await start_account(info)
+                if c2:
+                    active_accounts.append(info); account_clients[info['id']] = c2
+                    account_stats[info['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                    account_stop_flags[info['id']] = False; register_ar(c2, info)
+                await update.message.reply_text(f"✅ **Added!** 🎉\n👤 {info['name']}\n📱 {info['phone']}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+                await client.disconnect(); context.user_data['await'] = None; return
+            except Exception as e:
+                await update.message.reply_text(f"❌ {str(e)[:80]}"); context.user_data['await'] = None; return
+        try:
+            await client.sign_in(phone, code)
+            me = await client.get_me()
+            ss = client.session.save()
+            info = {'id': gen_acc_id(), 'user_id': me.id, 'name': me.first_name or f"User{me.id}", 'phone': getattr(me, 'phone', phone), 'session': ss, 'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH, 'enabled': True, 'mode': 'ai', 'spam_active': False, 'proxy': None, 'is_backup': False, 'added_at': datetime.now().isoformat()}
+            add_account_data(info)
+            c2 = await start_account(info)
+            if c2:
+                active_accounts.append(info); account_clients[info['id']] = c2
+                account_stats[info['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                account_stop_flags[info['id']] = False; register_ar(c2, info)
+            await update.message.reply_text(f"✅ **Added!** 🎉\n👤 {info['name']}\n📱 {info['phone']}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+            await client.disconnect(); context.user_data['await'] = None
+        except SessionPasswordNeededError:
+            context.user_data['ac_2fa'] = True; context.user_data['await'] = 'ac_otp'
+            await update.message.reply_text("🔑 **2FA Password required:**", parse_mode='Markdown')
+        except PhoneCodeInvalidError:
+            await update.message.reply_text("❌ Invalid OTP! Try again:")
+        except PhoneCodeExpiredError:
+            await update.message.reply_text("❌ OTP expired! Start again.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+            context.user_data['await'] = None
+        except Exception as e:
+            await update.message.reply_text(f"❌ {str(e)[:80]}"); context.user_data['await'] = None
+    elif aw == 'ac_ss' or aw == 'ac_bk_ss':
+        ss = text.strip()
+        is_backup = (aw == 'ac_bk_ss')
+        await update.message.reply_text("⏳ Testing session string...")
+        success, name, uid, phone = await test_session(ss)
+        if success:
+            info = {'id': gen_acc_id(), 'user_id': uid, 'name': name, 'phone': phone, 'session': ss, 'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH, 'enabled': True, 'mode': 'ai', 'spam_active': False, 'proxy': None, 'is_backup': is_backup, 'added_at': datetime.now().isoformat()}
+            add_account_data(info, is_backup=is_backup)
+            if not is_backup:
+                c2 = await start_account(info)
+                if c2:
+                    active_accounts.append(info); account_clients[info['id']] = c2
+                    account_stats[info['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                    account_stop_flags[info['id']] = False; register_ar(c2, info)
+            await update.message.reply_text(f"✅ **{'Backup ' if is_backup else ''}Account Added!** 🎉\n👤 {name}\n📱 {phone}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+        else:
+            await update.message.reply_text(f"❌ Invalid session!\nError: {name}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+        context.user_data['await'] = None
+    elif aw == 'proxy':
+        aid = context.user_data.get('pr_aid', '')
+        if text.lower() == 'remove':
+            all_d = load_accounts_data()
+            for key in ['main', 'backup']:
+                for i, a in enumerate(all_d[key]):
+                    if a['id'] == aid:
+                        all_d[key][i]['proxy'] = None
+                        save_json(ACCOUNTS_FILE, all_d)
+                        await update.message.reply_text("✅ Proxy removed!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_pr")]]))
+                        context.user_data['await'] = None; context.user_data['pr_aid'] = None
+                        return
+            await update.message.reply_text("❌ Account not found!")
+        else:
+            parts = text.split(':')
+            if len(parts) >= 3:
+                proxy = {'type': parts[0], 'addr': parts[1], 'port': int(parts[2]), 'rdns': True, 'username': parts[3] if len(parts) > 3 else '', 'password': parts[4] if len(parts) > 4 else ''}
+                all_d = load_accounts_data()
+                for key in ['main', 'backup']:
+                    for i, a in enumerate(all_d[key]):
+                        if a['id'] == aid:
+                            all_d[key][i]['proxy'] = proxy
+                            save_json(ACCOUNTS_FILE, all_d)
+                            for ac in active_accounts:
+                                if ac['id'] == aid:
+                                    ac['proxy'] = proxy; break
+                            await update.message.reply_text("✅ Proxy set! Restart account to apply.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_pr")]]))
+                            context.user_data['await'] = None; context.user_data['pr_aid'] = None
+                            return
+                await update.message.reply_text("❌ Account not found!")
+            else:
+                await update.message.reply_text("❌ Invalid format! Use: `type:ip:port:user:pass`", parse_mode='Markdown')
+        context.user_data['await'] = None
+        context.user_data['pr_aid'] = None
+    else:
+        await update.message.reply_text("Unknown command. Use /start")
         context.user_data['await'] = None
