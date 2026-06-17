@@ -94,7 +94,7 @@ ALL_EMOJIS = [
     '😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🥰','😍','🤩','😘',
     '😗','☺️','😚','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐',
     '😬','🤨','😐','😑','😶','😏','😒','🙄','😌','😔','😪','🤤','😴','😷',
-    '🤒','🤕','🤢','🤮','🤧','🥵','🥶','😎','🥸','🤓','🧐','😕','😟','🙁',
+    '🤒','🤕','🤢','🤣','🤧','🥵','🥶','😎','🥸','🤓','🧐','😕','😟','🙁',
     '☹️','😮','😯','😲','🥱','😳','🥺','😢','😭','😱','😖','😣','😞','😓',
     '😩','😫','😤','😡','😠','🤬','👹','☠️','💀','👿','😈','👺','👻','👽',
     '👾','🤖','🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮',
@@ -1248,8 +1248,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Account not found!")
             else:
                 await update.message.reply_text("❌ Invalid format! Use: `type:ip:port:user:pass`", parse_mode='Markdown')
-        context.user_data['await'] = None; context.user_data['pr_aid'] = None
-        # ─── Main Setup & Run ───
+        context.user_data['await'] = None
+        context.user_data['pr_aid'] = None
+    else:
+        await update.message.reply_text("Unknown command. Use /start")
+        context.user_data['await'] = None
+
+
+# ─── Main Setup & Run ───
 async def setup_and_run():
     global ptb_application, bot_ready, bot_event_loop
     logger.info("=" * 50)
@@ -1260,9 +1266,11 @@ async def setup_and_run():
     ptb_application.add_handler(CommandHandler("start", start_command))
     ptb_application.add_handler(CallbackQueryHandler(handle_callback))
     ptb_application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
     async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"PTB Error: {context.error}", exc_info=True)
     ptb_application.add_error_handler(error_handler)
+
     if RENDER_URL:
         webhook_url = f"{RENDER_URL}/webhook"
         logger.info(f"Setting up webhook: {webhook_url}")
@@ -1273,17 +1281,20 @@ async def setup_and_run():
         await ptb_application.initialize()
         await ptb_application.start()
         await ptb_application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
     logger.info("Setting up auto-reply accounts...")
     await setup_auto_reply()
     logger.info(f"Active accounts: {len(active_accounts)}")
     bot_ready = True
     logger.info("✅ BOT IS READY!")
+
     try:
         await shutdown_event.wait()
     except asyncio.CancelledError:
         pass
     finally:
         await shutdown_bot()
+
 
 async def shutdown_bot():
     global bot_ready
@@ -1295,18 +1306,23 @@ async def shutdown_bot():
             await client.disconnect()
         except:
             pass
-    account_clients.clear(); active_accounts.clear()
+    account_clients.clear()
+    active_accounts.clear()
     if ptb_application:
         try:
             if RENDER_URL:
                 await ptb_application.bot.delete_webhook()
             if hasattr(ptb_application, 'updater') and ptb_application.updater:
                 await ptb_application.updater.stop()
-            await ptb_application.stop(); await ptb_application.shutdown()
+            await ptb_application.stop()
+            await ptb_application.shutdown()
         except Exception as e:
             logger.warning(f"PTB shutdown warning: {e}")
     logger.info("Bot shutdown complete")
-    @flask_app.route('/')
+
+
+# ─── Flask Routes ───
+@flask_app.route('/')
 def home():
     return jsonify({'status': 'running' if bot_ready else 'starting', 'active_accounts': len(active_accounts), 'auto_reply': auto_reply_enabled, 'group_spam': group_spam_enabled, 'customers_today': len(customer_count), 'uptime': datetime.now().isoformat()})
 
@@ -1328,6 +1344,7 @@ def webhook():
 def health():
     return jsonify({'status': 'healthy', 'bot_ready': bot_ready, 'timestamp': datetime.now().isoformat()})
 
+# ─── Main Entry Point ───
 def run_flask():
     flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
