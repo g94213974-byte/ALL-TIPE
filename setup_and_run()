@@ -13,9 +13,10 @@ async def setup_and_run():
         logger.error(f"PTB Error: {context.error}", exc_info=True)
     ptb_application.add_error_handler(error_handler)
 
-    # ✅ প্রথমে initialize() কল করতে হবে
+    # ✅ প্রথমে initialize() কল করতে হবে — এটাই সবচেয়ে গুরুত্বপূর্ণ
     await ptb_application.initialize()
 
+    # ✅ এখন ওয়েবহুক বা পোলিং সেটআপ
     if RENDER_URL:
         webhook_url = f"{RENDER_URL}/webhook"
         logger.info(f"Setting up webhook: {webhook_url}")
@@ -24,7 +25,7 @@ async def setup_and_run():
         logger.info("Starting polling...")
         await ptb_application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
-    # ✅ তারপর start() — এটি উভয় মোডের জন্যই কাজ করবে
+    # ✅ তারপর start() — এটি এখন কাজ করবে কারণ initialize() আগেই কল করা হয়েছে
     await ptb_application.start()
 
     logger.info("Setting up auto-reply accounts...")
