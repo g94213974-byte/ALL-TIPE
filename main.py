@@ -130,15 +130,22 @@ def add_reply(kw, reply, tp="contains"):
     return rid
 
 def add_replies_bulk(data_list):
-    r = load_replies(); ids=[]
+    """একসাথে অনেকগুলো রিপ্লাই অ্যাড করুন"""
+    r = load_replies()
+    ids = []
     for kw, reply, tp in data_list:
         rid = max([x.get('id',0) for x in r], default=0)+1
-        r.append({'id':rid,'keyword':kw,'reply':reply,'type':tp}); ids.append(rid)
-    save_json(REPLIES_FILE, r); return ids
+        r.append({'id':rid,'keyword':kw,'reply':reply,'type':tp})
+        ids.append(rid)
+    save_json(REPLIES_FILE, r)
+    return ids
 
 def delete_reply(rid):
-    r = load_replies(); nr=[x for x in r if x['id']!=rid]
-    if len(nr)!=len(r): save_json(REPLIES_FILE, nr); return True
+    r = load_replies()
+    nr = [x for x in r if x['id']!=rid]
+    if len(nr)!=len(r):
+        save_json(REPLIES_FILE, nr)
+        return True
     return False
 
 def load_accounts_data(): return load_json(ACCOUNTS_FILE, {'main':[],'backup':[]})
@@ -541,7 +548,7 @@ async def cb(upd:Update,ctx:ContextTypes.DEFAULT_TYPE):
     elif data=="ar_a1": ctx.user_data['await']='rk'; await q.edit_message_text("➕ **Enter keyword**\nEx: `price`",parse_mode='Markdown',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙",callback_data="ar_rp")]]))
     elif data=="ar_ab":
         ctx.user_data['await']='rb'
-        await q.edit_message_text("➕ **Bulk Add** (one per line)\n\nFormat:\n`keyword | reply | exact/contains`\n\n```\nprice | Price 99 | contains\nhello | Hi! | exact\n```",parse_mode='Markdown',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙",callback_data="ar_rp")]]))
+        await q.edit_message_text("➕ **Bulk Add** (one per line)\n\nFormat:\n`keyword | reply | exact/contains`\n\n```\nprice | Price 99 | contains\nhello | Hi! | exact\n```\n\nএকসাথে অনেকগুলো রিপ্লাই যোগ করতে প্রতিটি লাইনে একটি করে দিন।",parse_mode='Markdown',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙",callback_data="ar_rp")]]))
     elif data=="ar_dl":
         rp=load_replies()[:15]
         if not rp: await q.edit_message_text("📭 Empty!",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙",callback_data="ar_rp")]])); return
@@ -761,22 +768,35 @@ async def txt_h(upd:Update,ctx:ContextTypes.DEFAULT_TYPE):
         ctx.user_data['await']=None
     
     elif aw=='rb':
-        lines=txt.strip().split('\n'); added=[]
+        """একসাথে অনেকগুলি রিপ্লাই যোগ করুন - Bulk Add"""
+        lines=txt.strip().split('\n')
+        data_list = []
+        success = 0
+        errors = 0
         for line in lines:
+            line = line.strip()
+            if not line:
+                continue
             parts=[p.strip() for p in line.split('|')]
             if len(parts)>=3:
                 kw,reply,mt=parts[0],parts[1],parts[2].lower()
                 if mt not in ['exact','contains']: mt='contains'
-                added.append(add_reply(kw,reply,mt))
-        await upd.message.reelif aw=='rb':
-        lines=txt.strip().split('\n'); added=[]
-        for line in lines:
-            parts=[p.strip() for p in line.split('|')]
-            if len(parts)>=3:
-                kw,reply,mt=parts[0],parts[1],parts[2].lower()
-                if mt not in ['exact','contains']: mt='contains'
-                added.append(add_reply(kw,reply,mt))
-        await upd.message.reply_text(f"✅ {len(added)} replies added!",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙",callback_data="ar_rp")]]))
+                data_list.append((kw, reply, mt))
+                success += 1
+            else:
+                errors += 1
+        
+        if data_list:
+            ids = add_replies_bulk(data_list)
+            msg = f"✅ {len(ids)} টি রিপ্লাই যোগ করা হলো!"
+            if errors:
+                msg += f"\n⚠️ {errors} টি লাইন ভুল ফরম্যাটে ছিল (স্কিপ করা হয়েছে)"
+            msg += "\n\n✅ ফরম্যাট: `keyword | reply | exact/contains`"
+        else:
+            msg = "❌ কোনো বৈধ রিপ্লাই পাওয়া যায়নি!\n\nফরম্যাট: `keyword | reply | exact/contains`"
+            msg += "\n\nউদাহরণ:\n```\nprice | Price 99 টাকা | contains\nhello | Hello baby! | exact\nbye | Bye bye | exact\n```"
+        
+        await upd.message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="ar_rp")]]))
         ctx.user_data['await']=None
     
     elif aw=='gs_bs':
@@ -809,6 +829,8 @@ async def txt_h(upd:Update,ctx:ContextTypes.DEFAULT_TYPE):
         ctx.user_data['await']=None
     
     elif aw=='dr_txt':
+        set_setting('default_reply_text',txt)
+        await upd.message.reply_text("✅ Default reply set!",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙elif aw=='dr_txt':
         set_setting('default_reply_text',txt)
         await upd.message.reply_text("✅ Default reply set!",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙",callback_data="m_set")]]))
         ctx.user_data['await']=None
