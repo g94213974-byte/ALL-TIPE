@@ -1,5 +1,5 @@
 telethon
 python-telegram-bot
 Flask
-python-socks[asyncio]
 httpx
+PySocks
