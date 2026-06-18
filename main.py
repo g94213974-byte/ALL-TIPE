@@ -101,6 +101,7 @@ shutdown_event = asyncio.Event()
 logout_notification_enabled = True
 
 _settings_cache = {}
+_settings_cache_dirty = False
 
 DEFAULT_SETTINGS = {
     'auto_reply_enabled': True,
@@ -149,15 +150,17 @@ def get_setting(key, default=None):
     return _settings_cache.get(key, default if default is not None else DEFAULT_SETTINGS.get(key))
 
 def set_setting(key, value):
-    global _settings_cache
+    global _settings_cache, _settings_cache_dirty
     if not _settings_cache:
         _load_settings_to_cache()
     _settings_cache[key] = value
+    _settings_cache_dirty = True
     try:
         tmp = SETTINGS_FILE.with_suffix('.tmp')
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(_settings_cache, f, indent=2, ensure_ascii=False)
         tmp.replace(SETTINGS_FILE)
+        _settings_cache_dirty = False
     except Exception as e:
         logger.error(f"Settings save failed: {e}")
 
@@ -1199,8 +1202,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not await_state:
         return
 
-    # ─── Manage await states ───
-
     if await_state == 'welcome_text':
         set_setting('welcome_message', text)
         context.user_data.pop('await', None)
@@ -1325,7 +1326,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data['ac_phone_code_hash'] = send_code.phone_code_hash
             context.user_data['ac_api_id'] = ac_api_id
             context.user_data['ac_api_hash'] = ac_api_hash
-            await update.message.reply_text(f"✅ OTP sent to {text}\n\nEnter OTP (or `00000` for test):", parse_mode='Markdown')
+            await update.message.reply_text(f"✅ OTP sent to {text}\n\nEnter OTP:", parse_mode='Markdown')
         except Exception as e:
             await update.message.reply_text(f"❌ OTP send failed: {str(e)[:100]}")
             context.user_data.pop('await', None)
@@ -1365,7 +1366,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data.pop('await', None)
             context.user_data.pop('ac_client', None)
             context.user_data.pop('phone', None)
-            await update.message.reply_text(f"✅ Account added!\n👤 {name}\n📱 {phone}\n\n🔄 Redeploy to activate.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+            await update.message.reply_text(f"✅ Account added!\n👤 {name}\n📱 {phone}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
             try:
                 n_client = await start_account(acc)
                 if n_client:
@@ -1374,7 +1375,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
                     register_ar(n_client, acc)
-                    await update.message.reply_text("✅ Account activated without redeploy!")
+                    await update.message.reply_text("✅ Auto-activated!")
             except:
                 pass
         except SessionPasswordNeededError:
