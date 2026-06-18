@@ -1617,7 +1617,7 @@ async def main_async():
 
     await ptb.initialize()
     await ptb.start()
-    await ptb.bot.delete_webview(drop_pending_updates=True)
+    await ptb.bot.delete_webhook(drop_pending_updates=True)
 
     await setup_auto_reply()
 
