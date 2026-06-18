@@ -61,7 +61,7 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
@@ -447,7 +447,6 @@ async def process_auto_reply_fast(event, client, acc, uid):
     except:
         pass
     
-    # Typing effect before reply
     if get_setting('typing_enabled', True):
         typing_duration = int(get_setting('typing_duration', 240))
         if typing_duration > 0:
@@ -457,7 +456,6 @@ async def process_auto_reply_fast(event, client, acc, uid):
             except:
                 pass
     
-    # Welcome message (first message only) - Text + Image
     if msg_count == 0 and get_setting('welcome_enabled', True):
         welcome_text = get_setting('welcome_message', '🔥 Welcome baby! 🔥')
         if WELCOME_IMAGE_FILE.exists():
@@ -470,7 +468,6 @@ async def process_auto_reply_fast(event, client, acc, uid):
         customer_count[uid] = msg_count + 1
         return
     
-    # Check ignored messages
     ignored = get_setting('ignored_messages', '')
     if ignored:
         for line in ignored.split('\n'):
@@ -478,21 +475,18 @@ async def process_auto_reply_fast(event, client, acc, uid):
                 customer_count[uid] = msg_count + 1
                 return
     
-    # Payment keywords
     payment_keywords = ['pay', 'payment', 'qr', 'scan', 'upi', 'paytm', 'send', 'bhejo', 'screenshot', 'method', 'transfer', 'rupees', 'rs', 'money']
     if any(kw in msg_lower for kw in payment_keywords):
         await send_payment_info(client, chat_id, event)
         customer_count[uid] = msg_count + 1
         return
     
-    # Media keywords
     media_keywords = ['pic', 'photo', 'image', 'nude', 'naked', 'dikhao', 'show', 'nangi', 'boob', 'mms']
     if any(kw in msg_lower for kw in media_keywords):
         await event.respond(get_setting('media_keyword_reply', 'Payment first baby 😘🔥'))
         customer_count[uid] = msg_count + 1
         return
     
-    # Service keywords
     service_keywords = ['service', 'chahiye', 'kharid', 'demo', 'video', 'call', 'vc', 'price', 'rate']
     if any(kw in msg_lower for kw in service_keywords):
         price_text = get_setting('price_list_text', "🔥 10 MIN VC → ₹99\n🔥 20 MIN VC → ₹119")
@@ -502,14 +496,12 @@ async def process_auto_reply_fast(event, client, acc, uid):
         customer_count[uid] = msg_count + 1
         return
     
-    # Offline keywords
     offline_keywords = ['real', 'meet', 'aao', 'ghar', 'location', 'offline']
     if any(kw in msg_lower for kw in offline_keywords):
         await event.respond(get_setting('offline_keyword_reply', 'Online only baby 😊'))
         customer_count[uid] = msg_count + 1
         return
     
-    # Greeting keywords
     greeting_keywords = ['hi', 'hello', 'hey', 'hii', 'hy', 'hlo', 'hlw', 'helo']
     if any(w in msg_lower for w in greeting_keywords):
         greetings = get_setting('greeting_replies', ['Hi baby, ready! 🔥', 'Hey baby! 😘', 'Hello! What you need? 🔥'])
@@ -517,7 +509,6 @@ async def process_auto_reply_fast(event, client, acc, uid):
         customer_count[uid] = msg_count + 1
         return
     
-    # Default reply
     defaults = get_setting('default_replies', ['Ready baby! Pay karo! 🔥', 'Main ready hoon! 😘', 'Service ready! 💯'])
     await event.respond(random.choice(defaults))
     customer_count[uid] = msg_count + 1
@@ -753,7 +744,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "main":
         await query.edit_message_text("🔥 **CONTROL PANEL** 🔥\n\nSelect an option below:", parse_mode='Markdown', reply_markup=main_keyboard())
     
-    # ====== AUTO REPLY (START ALL / STOP ALL) ======
     elif data == "m_ar":
         status = "🟢 ACTIVE" if auto_reply_enabled else "🔴 STOPPED"
         text = f"🤖 **AUTO REPLY**\n\nStatus: {status}\n\n▶️ Start All = সব একাউন্টের অটো রিপ্লাই চালু\n⏹️ Stop All = সব বন্ধ"
@@ -772,16 +762,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ar_start":
         auto_reply_enabled = True
         await query.edit_message_text("✅ **Auto Reply চালু হয়েছে!** সব একাউন্ট রিপ্লাই দিবে।", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
-        await asyncio.sleep(1)
-        await handle_callback(update, context)
     
     elif data == "ar_stop":
         auto_reply_enabled = False
         await query.edit_message_text("⏹️ **Auto Reply বন্ধ হয়েছে!** কোনো একাউন্ট রিপ্লাই দিবে না।", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
-        await asyncio.sleep(1)
-        await handle_callback(update, context)
     
-    # Welcome Message Settings (Text + Image)
     elif data == "ar_welcome":
         enabled = get_setting('welcome_enabled', True)
         status = "🟢 ON" if enabled else "🔴 OFF"
@@ -817,7 +802,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("❌ No image to remove!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
     
-    # Block Photo Settings
     elif data == "ar_blockphoto":
         enabled = get_setting('block_photo_enabled', True)
         status = "🟢 ON" if enabled else "🔴 OFF"
@@ -833,7 +817,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_setting('block_photo_enabled', not cur)
         await handle_callback(update, context)
     
-    # Typing Time Settings
     elif data == "ar_typing":
         enabled = get_setting('typing_enabled', True)
         duration = int(get_setting('typing_duration', 240))
@@ -855,7 +838,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['await'] = 'typing_time'
         await query.edit_message_text(f"⏱️ **Enter Typing Time (seconds):**\n\nCurrent: {get_setting('typing_duration', 240)}\n\nRange: 0-300\n\nEx: 60 = 1 মিনিট\n240 = 4 মিনিট", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_typing")]]))
     
-    # Ignored Messages
     elif data == "ar_ignore":
         context.user_data['await'] = 'ignore'
         cur = get_setting('ignored_messages', '')
@@ -864,7 +846,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt += "Example:\n`thanks`\n`bye`\n`ok`"
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
     
-    # Custom Replies
     elif data == "ar_replies":
         replies = load_json(REPLIES_FILE, [])
         txt = "📝 **Custom Replies**\n\n"
@@ -876,7 +857,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt += "\nUse /add_reply command to add."
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
     
-    # ====== GROUP SPAM (START ALL / STOP ALL) ======
     elif data == "m_gs":
         run = sum(1 for a in active_accounts if account_stats.get(a['id'], {}).get('spam_running', False))
         st = "🟢 ACTIVE" if group_spam_enabled else "🔴 STOPPED"
@@ -1003,7 +983,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             txt += f"{r} {a.get('name', '?')}: {s}\n"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
     
-    # ====== ACCOUNTS ======
     elif data == "m_acc":
         ma = len(get_main_accounts())
         ba = len(get_backup_accounts())
@@ -1117,7 +1096,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             txt += f"{st} {tp} {i}. {n} 📱{p}\n"
         await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
     
-    # ====== SETTINGS ======
     elif data == "m_set":
         bp = "🟢" if get_setting('block_photo_enabled', True) else "🔴"
         fs = "🟢" if get_setting('flood_slow_mode', True) else "🔴"
@@ -1181,7 +1159,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['await'] = 'qr_code'
         await query.edit_message_text("📷 **Send QR Code Image now:**\n\nJust send a photo.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
 
-    # ====== STATUS ======
     elif data == "m_stat":
         txt = f"📊 **Status**\n\n"
         txt += f"Total Accounts: {len(get_all_accounts())}\n"
@@ -1196,7 +1173,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("🔄 Refresh", callback_data="m_stat"), InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
-    # ====== ADMIN ======
     elif data == "m_adm":
         txt = f"🛡️ **Admin Panel**\n\nLogout Notification: {'🟢' if logout_notification_enabled else '🔴'}\n"
         kb = [
@@ -1242,12 +1218,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]
         await query.edit_message_text(f"✅ Reloaded! {len(active_accounts)} accounts active.", reply_markup=InlineKeyboardMarkup(kb))
 
-    # ====== TEXT INPUT HANDLING ======
     else:
         await query.edit_message_text(f"❓ Unknown option: {data}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
 
 
-# ====== MESSAGE HANDLER FOR TEXT INPUTS ======
+# ====== TEXT MESSAGE HANDLER ======
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != OWNER_ID and user_id not in admins:
@@ -1285,12 +1260,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text(txt)
         return
 
-    # Handle awaited inputs
     if await_state == 'welcome_text':
         set_setting('welcome_message', text)
         context.user_data['await'] = None
         await update.message.reply_text("✅ Welcome text updated!")
-
     elif await_state == 'typing_time':
         try:
             val = max(0, min(300, int(text)))
@@ -1299,44 +1272,26 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         except:
             await update.message.reply_text("❌ Invalid number!")
         context.user_data['await'] = None
-
     elif await_state == 'ignore':
         set_setting('ignored_messages', text)
         context.user_data['await'] = None
         await update.message.reply_text("✅ Ignored messages updated!")
-
-    elif await_state == 'gs_bs':
+    elif await_state in ['gs_bs', 'gs_bd', 'gs_cw']:
         try:
-            val = max(1, min(50, int(text)))
-            set_setting('spam_batch_size', val)
-            await update.message.reply_text(f"✅ Batch size set to {val}!")
+            val = int(text)
+            limits = {'gs_bs': (1, 50), 'gs_bd': (0, 30), 'gs_cw': (0, 300)}
+            minv, maxv = limits[await_state]
+            val = max(minv, min(maxv, val))
+            keys = {'gs_bs': 'spam_batch_size', 'gs_bd': 'spam_batch_delay', 'gs_cw': 'spam_cycle_wait'}
+            set_setting(keys[await_state], val)
+            await update.message.reply_text(f"✅ Set to {val}!")
         except:
             await update.message.reply_text("❌ Invalid!")
         context.user_data['await'] = None
-
-    elif await_state == 'gs_bd':
-        try:
-            val = max(0, min(30, int(text)))
-            set_setting('spam_batch_delay', val)
-            await update.message.reply_text(f"✅ Batch delay set to {val}s!")
-        except:
-            await update.message.reply_text("❌ Invalid!")
-        context.user_data['await'] = None
-
-    elif await_state == 'gs_cw':
-        try:
-            val = max(0, min(300, int(text)))
-            set_setting('spam_cycle_wait', val)
-            await update.message.reply_text(f"✅ Cycle wait set to {val}s!")
-        except:
-            await update.message.reply_text("❌ Invalid!")
-        context.user_data['await'] = None
-
     elif await_state == 'gs_msg_add':
         add_spam_message(text)
         context.user_data['await'] = None
         await update.message.reply_text("✅ Spam message added!")
-
     elif await_state == 'ac_ph':
         context.user_data['phone'] = text
         context.user_data['await'] = 'ac_otp'
@@ -1350,7 +1305,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
             context.user_data['await'] = None
-
     elif await_state == 'ac_otp':
         phone = context.user_data.get('phone', '')
         client = context.user_data.get('temp_client')
@@ -1364,21 +1318,15 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             me = await client.get_me()
             session_str = client.session.save()
             acc = {
-                'id': gen_acc_id(),
-                'name': me.first_name or 'Unknown',
-                'phone': phone,
-                'user_id': me.id,
-                'session': session_str,
-                'api_id': DEFAULT_API_ID,
-                'api_hash': DEFAULT_API_HASH,
-                'enabled': True,
-                'is_backup': False,
-                'proxy': None
+                'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
+                'phone': phone, 'user_id': me.id, 'session': session_str,
+                'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
+                'enabled': True, 'is_backup': False, 'proxy': None
             }
             add_account_data(acc)
             await client.disconnect()
             context.user_data['await'] = None
-            await update.message.reply_text(f"✅ Account added: {me.first_name}!\n\nNow starting...")
+            await update.message.reply_text(f"✅ Account added: {me.first_name}!\n\nStarting...")
             c = await start_account(acc)
             if c:
                 active_accounts.append(acc)
@@ -1386,14 +1334,13 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                 account_stop_flags[acc['id']] = False
                 register_ar(c, acc)
-                await update.message.reply_text("✅ Account started successfully!")
+                await update.message.reply_text("✅ Account started!")
         except SessionPasswordNeededError:
             context.user_data['await'] = 'ac_2fa'
-            await update.message.reply_text("🔐 2FA enabled! Enter your password:")
+            await update.message.reply_text("🔐 2FA enabled! Enter password:")
         except Exception as e:
             await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
             context.user_data['await'] = None
-
     elif await_state == 'ac_2fa':
         client = context.user_data.get('temp_client')
         if client:
@@ -1403,16 +1350,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 session_str = client.session.save()
                 phone = context.user_data.get('phone', '')
                 acc = {
-                    'id': gen_acc_id(),
-                    'name': me.first_name or 'Unknown',
-                    'phone': phone,
-                    'user_id': me.id,
-                    'session': session_str,
-                    'api_id': DEFAULT_API_ID,
-                    'api_hash': DEFAULT_API_HASH,
-                    'enabled': True,
-                    'is_backup': False,
-                    'proxy': None
+                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
+                    'phone': phone, 'user_id': me.id, 'session': session_str,
+                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
+                    'enabled': True, 'is_backup': False, 'proxy': None
                 }
                 add_account_data(acc)
                 await client.disconnect()
@@ -1425,11 +1366,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
                     register_ar(c, acc)
-                    await update.message.reply_text("✅ Account started successfully!")
+                    await update.message.reply_text("✅ Account started!")
             except Exception as e:
                 await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
                 context.user_data['await'] = None
-
     elif await_state == 'ac_ss':
         try:
             client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
@@ -1438,16 +1378,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             if me:
                 session_str = client.session.save()
                 acc = {
-                    'id': gen_acc_id(),
-                    'name': me.first_name or 'Unknown',
-                    'phone': f"+{me.phone or 'Unknown'}",
-                    'user_id': me.id,
-                    'session': session_str,
-                    'api_id': DEFAULT_API_ID,
-                    'api_hash': DEFAULT_API_HASH,
-                    'enabled': True,
-                    'is_backup': False,
-                    'proxy': None
+                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
+                    'phone': f"+{me.phone or 'Unknown'}", 'user_id': me.id, 'session': session_str,
+                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
+                    'enabled': True, 'is_backup': False, 'proxy': None
                 }
                 add_account_data(acc)
                 await client.disconnect()
@@ -1466,7 +1400,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
         context.user_data['await'] = None
-
     elif await_state == 'ac_bk_ss':
         try:
             client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
@@ -1475,16 +1408,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             if me:
                 session_str = client.session.save()
                 acc = {
-                    'id': gen_acc_id(),
-                    'name': me.first_name or 'Unknown',
-                    'phone': f"+{me.phone or 'Unknown'}",
-                    'user_id': me.id,
-                    'session': session_str,
-                    'api_id': DEFAULT_API_ID,
-                    'api_hash': DEFAULT_API_HASH,
-                    'enabled': False,
-                    'is_backup': True,
-                    'proxy': None
+                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
+                    'phone': f"+{me.phone or 'Unknown'}", 'user_id': me.id, 'session': session_str,
+                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
+                    'enabled': False, 'is_backup': True, 'proxy': None
                 }
                 add_account_data(acc, is_backup=True)
                 await client.disconnect()
@@ -1494,7 +1421,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
         context.user_data['await'] = None
-
     elif await_state == 'proxy':
         aid = context.user_data.get('pr_aid')
         acc = find_account(aid) if aid else None
@@ -1507,59 +1433,41 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             d = load_accounts_data()
             for key in ['main', 'backup']:
                 for i, a in enumerate(d[key]):
-                    if a['id'] == aid:
-                        d[key][i]['proxy'] = None
-                        break
+                    if a['id'] == aid: d[key][i]['proxy'] = None; break
             save_json(ACCOUNTS_FILE, d)
             await update.message.reply_text("✅ Proxy removed!")
         else:
             parts = text.split(':')
-            if len(parts) >= 3:
-                proxy = {
-                    'addr': parts[1],
-                    'port': int(parts[2]),
-                    'username': parts[3] if len(parts) > 3 else '',
-                    'password': parts[4] if len(parts) > 4 else '',
-                    'rdns': True
-                }
-                if parts[0] == 'socks5':
-                    acc['proxy'] = proxy
-                    d = load_accounts_data()
-                    for key in ['main', 'backup']:
-                        for i, a in enumerate(d[key]):
-                            if a['id'] == aid:
-                                d[key][i]['proxy'] = proxy
-                                break
-                    save_json(ACCOUNTS_FILE, d)
-                    await update.message.reply_text("✅ Proxy set! Restart account to apply.")
-                else:
-                    await update.message.reply_text("❌ Use format: socks5:ip:port:user:pass")
+            if len(parts) >= 3 and parts[0] == 'socks5':
+                proxy = {'addr': parts[1], 'port': int(parts[2]), 'username': parts[3] if len(parts) > 3 else '', 'password': parts[4] if len(parts) > 4 else '', 'rdns': True}
+                acc['proxy'] = proxy
+                d = load_accounts_data()
+                for key in ['main', 'backup']:
+                    for i, a in enumerate(d[key]):
+                        if a['id'] == aid: d[key][i]['proxy'] = proxy; break
+                save_json(ACCOUNTS_FILE, d)
+                await update.message.reply_text("✅ Proxy set! Restart account to apply.")
             else:
-                await update.message.reply_text("❌ Invalid format! Use: socks5:ip:port:user:pass")
+                await update.message.reply_text("❌ Use: socks5:ip:port:user:pass")
         context.user_data['await'] = None
-
     elif await_state == 'upi_id':
         set_setting('upi_id', text)
         context.user_data['await'] = None
-        await update.message.reply_text(f"✅ UPI ID set to: {text}")
-
+        await update.message.reply_text(f"✅ UPI ID set!")
     elif await_state == 'paytm_num':
         set_setting('paytm_num', text)
         context.user_data['await'] = None
-        await update.message.reply_text(f"✅ Paytm set to: {text}")
-
+        await update.message.reply_text(f"✅ Paytm set!")
     elif await_state == 'price_list':
         set_setting('price_list_text', text)
         context.user_data['await'] = None
         await update.message.reply_text("✅ Price list updated!")
-
     elif await_state == 'payment_reply':
         set_setting('payment_keyword_reply', text)
         context.user_data['await'] = None
-        await update.message.reply_text(f"✅ Payment reply set to: {text}")
-
+        await update.message.reply_text(f"✅ Payment reply set!")
     else:
-        await update.message.reply_text(f"❓ Unknown input state: {await_state}")
+        await update.message.reply_text(f"❓ Unknown input: {await_state}")
         context.user_data['await'] = None
 
 
@@ -1569,23 +1477,20 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if user_id != OWNER_ID and user_id not in admins:
         return
     await_state = context.user_data.get('await')
-
     if await_state == 'welcome_image':
         photo = update.message.photo[-1]
         file = await photo.get_file()
         await file.download_to_drive(str(WELCOME_IMAGE_FILE))
         context.user_data['await'] = None
         await update.message.reply_text("✅ Welcome image updated!")
-
     elif await_state == 'qr_code':
         photo = update.message.photo[-1]
         file = await photo.get_file()
         await file.download_to_drive(str(QR_CODE_FILE))
         context.user_data['await'] = None
         await update.message.reply_text("✅ QR code updated!")
-
     else:
-        await update.message.reply_text("❓ Unexpected photo. Use menu to upload.")
+        await update.message.reply_text("❓ Unexpected photo.")
 
 
 # ====== FLASK ======
@@ -1607,24 +1512,44 @@ async def main_async():
 
     logger.info("Starting bot...")
 
+    # Fix: Initialize files
+    if not SETTINGS_FILE.exists() or SETTINGS_FILE.stat().st_size == 0:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(DEFAULT_SETTINGS, f, indent=2, ensure_ascii=False)
+    if not ACCOUNTS_FILE.exists() or ACCOUNTS_FILE.stat().st_size == 0:
+        with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump({"main": [], "backup": []}, f, indent=2)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    PAYMENT_SS_DIR.mkdir(parents=True, exist_ok=True)
+
+    _load_settings_to_cache()
+
     ptb = Application.builder().token(BOT_TOKEN).build()
     ptb_application = ptb
-
     ptb.add_handler(CommandHandler("start", start_command))
     ptb.add_handler(CallbackQueryHandler(handle_callback))
     ptb.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     ptb.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
-
     await ptb.initialize()
     await ptb.start()
     await ptb.bot.delete_webhook(drop_pending_updates=True)
-
     await setup_auto_reply()
-
     asyncio.create_task(check_account_status_periodically())
-
     bot_ready = True
     logger.info(f"Bot ready! Owner ID: {OWNER_ID}")
+
+    # Notify owner
+    try:
+        if not active_accounts:
+            await ptb.bot.send_message(chat_id=OWNER_ID,
+                text="🤖 **Bot Ready!** 🔥\n\n⚠️ No accounts found.\n👉 /start → Accounts → Add account\n\nThen use START ALL!",
+                parse_mode='Markdown')
+        else:
+            await ptb.bot.send_message(chat_id=OWNER_ID,
+                text=f"🤖 **Bot Ready!** 🔥\n✅ {len(active_accounts)} active!\nUse /start for control panel.",
+                parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Notify failed: {e}")
 
     try:
         await asyncio.Event().wait()
@@ -1634,24 +1559,374 @@ async def main_async():
         await ptb.stop()
         await ptb.shutdown()
 
+def main():
+    logger.info("=" * 50)
+    logger.info("TELEGRAM AUTO REPLY + SPAM BOT")
+    logger.info("=" * 50)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info(f"Flask on port {PORT}")
+    try:
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        logger.info("Stopped.")
+    except Exception as e:
+        logger.error(f"Fatal: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+    # ====== TEXT MESSAGE HANDLER ======
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID and user_id not in admins:
+        return
+    text = update.message.text.strip()
+    await_state = context.user_data.get('await')
+
+    if not await_state:
+        if text.startswith('/'):
+            if text == '/start':
+                await start_command(update, context)
+            elif text.startswith('/add_reply'):
+                parts = text.split(' ', 2)
+                if len(parts) >= 3:
+                    keyword = parts[1].lower()
+                    reply = parts[2]
+                    replies = load_json(REPLIES_FILE, [])
+                    replies.append({'keyword': keyword, 'reply': reply, 'added_at': datetime.now().isoformat()})
+                    save_json(REPLIES_FILE, replies)
+                    await update.message.reply_text(f"✅ Reply added: `{keyword}` → {reply[:30]}...")
+                else:
+                    await update.message.reply_text("❌ Usage: /add_reply keyword reply_text")
+            elif text == '/accounts':
+                all_a = get_all_accounts()
+                txt = f"📋 **All Accounts ({len(all_a)})**\n\n"
+                for i, a in enumerate(all_a, 1):
+                    n = a.get('name', '?')
+                    p = a.get('phone', 'N/A')
+                    tp = "MAIN" if not a.get('is_backup') else "BACKUP"
+                    st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
+                    txt += f"{st} {tp} {i}. {n} 📱{p}\n"
+                await update.message.reply_text(txt[:4000])
+            elif text == '/status':
+                txt = f"📊 **Status**\n\nTotal: {len(get_all_accounts())}\nActive: {len(active_accounts)}\nAuto Reply: {'🟢' if auto_reply_enabled else '🔴'}\nGroup Spam: {'🟢' if group_spam_enabled else '🔴'}"
+                await update.message.reply_text(txt)
+        return
+
+    if await_state == 'welcome_text':
+        set_setting('welcome_message', text)
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Welcome text updated!")
+    elif await_state == 'typing_time':
+        try:
+            val = max(0, min(300, int(text)))
+            set_setting('typing_duration', val)
+            await update.message.reply_text(f"✅ Typing time set to {val}s!")
+        except:
+            await update.message.reply_text("❌ Invalid number!")
+        context.user_data['await'] = None
+    elif await_state == 'ignore':
+        set_setting('ignored_messages', text)
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Ignored messages updated!")
+    elif await_state in ['gs_bs', 'gs_bd', 'gs_cw']:
+        try:
+            val = int(text)
+            limits = {'gs_bs': (1, 50), 'gs_bd': (0, 30), 'gs_cw': (0, 300)}
+            minv, maxv = limits[await_state]
+            val = max(minv, min(maxv, val))
+            keys = {'gs_bs': 'spam_batch_size', 'gs_bd': 'spam_batch_delay', 'gs_cw': 'spam_cycle_wait'}
+            set_setting(keys[await_state], val)
+            await update.message.reply_text(f"✅ Set to {val}!")
+        except:
+            await update.message.reply_text("❌ Invalid!")
+        context.user_data['await'] = None
+    elif await_state == 'gs_msg_add':
+        add_spam_message(text)
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Spam message added!")
+    elif await_state == 'ac_ph':
+        context.user_data['phone'] = text
+        context.user_data['await'] = 'ac_otp'
+        try:
+            client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
+            await client.connect()
+            sent = await client.send_code_request(text)
+            context.user_data['phone_code_hash'] = sent.phone_code_hash
+            context.user_data['temp_client'] = client
+            await update.message.reply_text(f"✅ OTP sent to {text}!\n\nEnter OTP:")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+            context.user_data['await'] = None
+    elif await_state == 'ac_otp':
+        phone = context.user_data.get('phone', '')
+        client = context.user_data.get('temp_client')
+        phone_code_hash = context.user_data.get('phone_code_hash')
+        if not client:
+            await update.message.reply_text("❌ Session expired! Start again.")
+            context.user_data['await'] = None
+            return
+        try:
+            await client.sign_in(phone, text, phone_code_hash=phone_code_hash)
+            me = await client.get_me()
+            session_str = client.session.save()
+            acc = {
+                'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
+                'phone': phone, 'user_id': me.id, 'session': session_str,
+                'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
+                'enabled': True, 'is_backup': False, 'proxy': None
+            }
+            add_account_data(acc)
+            await client.disconnect()
+            context.user_data['await'] = None
+            await update.message.reply_text(f"✅ Account added: {me.first_name}!\n\nStarting...")
+            c = await start_account(acc)
+            if c:
+                active_accounts.append(acc)
+                account_clients[acc['id']] = c
+                account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                account_stop_flags[acc['id']] = False
+                register_ar(c, acc)
+                await update.message.reply_text("✅ Account started!")
+        except SessionPasswordNeededError:
+            context.user_data['await'] = 'ac_2fa'
+            await update.message.reply_text("🔐 2FA enabled! Enter password:")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+            context.user_data['await'] = None
+    elif await_state == 'ac_2fa':
+        client = context.user_data.get('temp_client')
+        if client:
+            try:
+                await client.sign_in(password=text)
+                me = await client.get_me()
+                session_str = client.session.save()
+                phone = context.user_data.get('phone', '')
+                acc = {
+                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
+                    'phone': phone, 'user_id': me.id, 'session': session_str,
+                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
+                    'enabled': True, 'is_backup': False, 'proxy': None
+                }
+                add_account_data(acc)
+                await client.disconnect()
+                context.user_data['await'] = None
+                await update.message.reply_text(f"✅ Account added: {me.first_name}!")
+                c = await start_account(acc)
+                if c:
+                    active_accounts.append(acc)
+                    account_clients[acc['id']] = c
+                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                    account_stop_flags[acc['id']] = False
+                    register_ar(c, acc)
+                    await update.message.reply_text("✅ Account started!")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+                context.user_data['await'] = None
+    elif await_state == 'ac_ss':
+        try:
+            client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
+            await client.connect()
+            me = await client.get_me()
+            if me:
+                session_str = client.session.save()
+                acc = {
+                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
+                    'phone': f"+{me.phone or 'Unknown'}", 'user_id': me.id, 'session': session_str,
+                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
+                    'enabled': True, 'is_backup': False, 'proxy': None
+                }
+                add_account_data(acc)
+                await client.disconnect()
+                context.user_data['await'] = None
+                await update.message.reply_text(f"✅ Account added: {me.first_name}!")
+                c = await start_account(acc)
+                if c:
+                    active_accounts.append(acc)
+                    account_clients[acc['id']] = c
+                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                    account_stop_flags[acc['id']] = False
+                    register_ar(c, acc)
+                    await update.message.reply_text("✅ Account started!")
+            else:
+                await update.message.reply_text("❌ Invalid session!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+        context.user_data['await'] = None
+    elif await_state == 'ac_bk_ss':
+        try:
+            client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
+            await client.connect()
+            me = await client.get_me()
+            if me:
+                session_str = client.session.save()
+                acc = {
+                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
+                    'phone': f"+{me.phone or 'Unknown'}", 'user_id': me.id, 'session': session_str,
+                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
+                    'enabled': False, 'is_backup': True, 'proxy': None
+                }
+                add_account_data(acc, is_backup=True)
+                await client.disconnect()
+                await update.message.reply_text(f"✅ Backup added: {me.first_name}!")
+            else:
+                await update.message.reply_text("❌ Invalid session!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+        context.user_data['await'] = None
+    elif await_state == 'proxy':
+        aid = context.user_data.get('pr_aid')
+        acc = find_account(aid) if aid else None
+        if not acc:
+            await update.message.reply_text("❌ Account not found!")
+            context.user_data['await'] = None
+            return
+        if text.lower() == 'remove':
+            acc['proxy'] = None
+            d = load_accounts_data()
+            for key in ['main', 'backup']:
+                for i, a in enumerate(d[key]):
+                    if a['id'] == aid: d[key][i]['proxy'] = None; break
+            save_json(ACCOUNTS_FILE, d)
+            await update.message.reply_text("✅ Proxy removed!")
+        else:
+            parts = text.split(':')
+            if len(parts) >= 3 and parts[0] == 'socks5':
+                proxy = {'addr': parts[1], 'port': int(parts[2]), 'username': parts[3] if len(parts) > 3 else '', 'password': parts[4] if len(parts) > 4 else '', 'rdns': True}
+                acc['proxy'] = proxy
+                d = load_accounts_data()
+                for key in ['main', 'backup']:
+                    for i, a in enumerate(d[key]):
+                        if a['id'] == aid: d[key][i]['proxy'] = proxy; break
+                save_json(ACCOUNTS_FILE, d)
+                await update.message.reply_text("✅ Proxy set! Restart account to apply.")
+            else:
+                await update.message.reply_text("❌ Use: socks5:ip:port:user:pass")
+        context.user_data['await'] = None
+    elif await_state == 'upi_id':
+        set_setting('upi_id', text)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ UPI ID set!")
+    elif await_state == 'paytm_num':
+        set_setting('paytm_num', text)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ Paytm set!")
+    elif await_state == 'price_list':
+        set_setting('price_list_text', text)
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Price list updated!")
+    elif await_state == 'payment_reply':
+        set_setting('payment_keyword_reply', text)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ Payment reply set!")
+    else:
+        await update.message.reply_text(f"❓ Unknown input: {await_state}")
+        context.user_data['await'] = None
+
+
+# ====== PHOTO HANDLER ======
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID and user_id not in admins:
+        return
+    await_state = context.user_data.get('await')
+    if await_state == 'welcome_image':
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        await file.download_to_drive(str(WELCOME_IMAGE_FILE))
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Welcome image updated!")
+    elif await_state == 'qr_code':
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        await file.download_to_drive(str(QR_CODE_FILE))
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ QR code updated!")
+    else:
+        await update.message.reply_text("❓ Unexpected photo.")
+
+
+# ====== FLASK ======
+@flask_app.route('/')
+def home():
+    return jsonify({"status": "running", "accounts": len(get_all_accounts()), "active": len(active_accounts)})
+
+@flask_app.route('/health')
+def health():
+    return jsonify({"ok": True})
+
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+
+
+# ====== MAIN ======
+async def main_async():
+    global bot_ready, ptb_application
+
+    logger.info("Starting bot...")
+
+    # Initialize files
+    if not SETTINGS_FILE.exists() or SETTINGS_FILE.stat().st_size == 0:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(DEFAULT_SETTINGS, f, indent=2, ensure_ascii=False)
+    if not ACCOUNTS_FILE.exists() or ACCOUNTS_FILE.stat().st_size == 0:
+        with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump({"main": [], "backup": []}, f, indent=2)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    PAYMENT_SS_DIR.mkdir(parents=True, exist_ok=True)
+
+    _load_settings_to_cache()
+
+    ptb = Application.builder().token(BOT_TOKEN).build()
+    ptb_application = ptb
+    ptb.add_handler(CommandHandler("start", start_command))
+    ptb.add_handler(CallbackQueryHandler(handle_callback))
+    ptb.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
+    ptb.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
+    await ptb.initialize()
+    await ptb.start()
+    await ptb.bot.delete_webhook(drop_pending_updates=True)
+    await setup_auto_reply()
+    asyncio.create_task(check_account_status_periodically())
+    bot_ready = True
+    logger.info(f"Bot ready! Owner ID: {OWNER_ID}")
+
+    # Notify owner
+    try:
+        if not active_accounts:
+            await ptb.bot.send_message(chat_id=OWNER_ID,
+                text="🤖 **Bot Ready!** 🔥\n\n⚠️ No accounts found.\n👉 /start → Accounts → Add account\n\nThen use START ALL!",
+                parse_mode='Markdown')
+        else:
+            await ptb.bot.send_message(chat_id=OWNER_ID,
+                text=f"🤖 **Bot Ready!** 🔥\n✅ {len(active_accounts)} active!\nUse /start for control panel.",
+                parse_mode='Markdown')
+    except Exception as e:
+        logger.warning(f"Notify failed: {e}")
+
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await ptb.stop()
+        await ptb.shutdown()
 
 def main():
     logger.info("=" * 50)
     logger.info("TELEGRAM AUTO REPLY + SPAM BOT")
     logger.info("=" * 50)
-
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    logger.info(f"Flask running on port {PORT}")
-
+    logger.info(f"Flask on port {PORT}")
     try:
         asyncio.run(main_async())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user.")
+        logger.info("Stopped.")
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"Fatal: {e}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
