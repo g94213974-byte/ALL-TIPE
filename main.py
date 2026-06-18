@@ -125,10 +125,10 @@ DEFAULT_SETTINGS = {
     'paytm_num': '',
     'qr_code_path': '',
     'payment_keyword_reply': 'Scan & Pay baby 😘🔥',
-    'media_keyword_reply': 'Payment first baby 😘🔥',
+    'media_keyword_reply': 'Pay and come baby 😘🔥',
     'offline_keyword_reply': 'Online only baby 😊',
-    'greeting_replies': ['Hi baby, ready! 🔥', 'Hey baby! 😘', 'Hello! What you need? 🔥'],
-    'default_replies': ['Ready baby! Pay karo! 🔥', 'Main ready hoon! 😘', 'Service ready! 💯']
+    'greeting_replies': ['i am ready baby pay and come🔥', 'Hey baby! 😘', 'Hello! kitna min cheye? 🔥'],
+    'default_replies': ['Ready baby! Pay karo and come vc! 🔥', 'Main ready hoon! 😘', 'pay and come baby🥰']
 }
 
 def _load_settings():
@@ -395,7 +395,7 @@ async def handle_banned(acc):
         logger.warning("No backups!")
 
 # ====== AUTO REPLY ======
-ALL_EMOJIS = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🥰','😍','🤩','😘']
+ALL_EMOJIS = ['😀','😃','😄','😁','😆','😅','😉','🙈','😊','😇','🥰','😍','🤩','😘']
 
 def get_random_emoji():
     return random.choice(ALL_EMOJIS)
@@ -569,13 +569,13 @@ async def process_auto_reply_fast(event, client, acc, uid):
     # Greeting keywords
     greeting_keywords = ['hi', 'hello', 'hey', 'hii', 'hy', 'hlo', 'hlw', 'helo']
     if any(w in msg_lower for w in greeting_keywords):
-        greetings = get_setting('greeting_replies', ['Hi baby, ready! 🔥', 'Hey baby! 😘', 'Hello! What you need? 🔥'])
+        greetings = get_setting('greeting_replies', ['Hi baby, ready! 🔥', 'Hey baby! 😘', 'Hello! kitna min cheye? 🔥'])
         await event.respond(random.choice(greetings))
         customer_count[uid] = msg_count + 1
         return
     
     # Default reply
-    defaults = get_setting('default_replies', ['Ready baby! Pay karo! 🔥', 'Main ready hoon! 😘', 'Service ready! 💯'])
+    defaults = get_setting('default_replies', ['Ready baby! Pay karo! 🔥', 'Main ready hoon pay and come baby 😘', 'pay and come! 💯'])
     await event.respond(random.choice(defaults))
     customer_count[uid] = msg_count + 1
 
