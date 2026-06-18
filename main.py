@@ -2,12 +2,12 @@
 """
 UNIFIED TELEGRAM BOT - CUSTOM VERSION
 Features:
-- START ALL / STOP ALL buttons for Auto Reply & Group Spam
-- Welcome Message with Text + Image (customizable from bot)
-- QR Code upload from bot
-- Typing effect (customizable time)
-- Block Photo toggle
-- Payment settings (UPI/Paytm/QR)
+- Auto Reply with Wait Time + Typing
+- Multiple message detection (only first gets reply, rest seen only)
+- Welcome Message 1 (with image) + Welcome Message 2 (text only)
+- START ALL / STOP ALL buttons with Running count
+- Group Spam with speed control
+- Custom wait time configurable from bot
 """
 
 import os, sys, json, asyncio, random, logging, threading, time
@@ -101,17 +101,18 @@ shutdown_event = asyncio.Event()
 logout_notification_enabled = True
 
 _settings_cache = {}
-_settings_cache_dirty = False
 
 DEFAULT_SETTINGS = {
     'auto_reply_enabled': True,
     'group_spam_enabled': True,
     'welcome_enabled': True,
     'welcome_message': '🔥 Welcome baby! 🔥\n\nSend "price" for rates\nSend "pay" for payment',
+    'welcome_message_2': '🔥 I am available now! 😘\n\nTell me what you need?',
     'block_photo_enabled': True,
     'typing_enabled': True,
     'typing_duration': 240,
     'seen_delay': 1,
+    'wait_time': 300,
     'spam_speed': 'medium',
     'spam_batch_size': 5,
     'spam_batch_delay': 3,
@@ -130,7 +131,7 @@ DEFAULT_SETTINGS = {
     'default_replies': ['Ready baby! Pay karo! 🔥', 'Main ready hoon! 😘', 'Service ready! 💯']
 }
 
-def _load_settings_to_cache():
+def _load_settings():
     global _settings_cache
     try:
         if SETTINGS_FILE.exists() and SETTINGS_FILE.stat().st_size > 0:
@@ -146,21 +147,19 @@ def _load_settings_to_cache():
 
 def get_setting(key, default=None):
     if not _settings_cache:
-        _load_settings_to_cache()
+        _load_settings()
     return _settings_cache.get(key, default if default is not None else DEFAULT_SETTINGS.get(key))
 
 def set_setting(key, value):
-    global _settings_cache, _settings_cache_dirty
+    global _settings_cache
     if not _settings_cache:
-        _load_settings_to_cache()
+        _load_settings()
     _settings_cache[key] = value
-    _settings_cache_dirty = True
     try:
         tmp = SETTINGS_FILE.with_suffix('.tmp')
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(_settings_cache, f, indent=2, ensure_ascii=False)
         tmp.replace(SETTINGS_FILE)
-        _settings_cache_dirty = False
     except Exception as e:
         logger.error(f"Settings save failed: {e}")
 
@@ -203,7 +202,6 @@ def add_account_data(acc, is_backup=False):
     key = 'backup' if is_backup else 'main'
     for existing in d[key]:
         if existing.get('user_id') == acc.get('user_id') or existing.get('session') == acc.get('session'):
-            logger.warning(f"Duplicate: {acc.get('name', 'Unknown')}")
             return False
     d[key].append(acc)
     save_json(ACCOUNTS_FILE, d)
@@ -402,6 +400,9 @@ ALL_EMOJIS = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','�
 def get_random_emoji():
     return random.choice(ALL_EMOJIS)
 
+# Track last message time per user for rapid message detection
+_user_last_msg_time = {}
+
 def register_ar(client, acc):
     @client.on(events.NewMessage(incoming=True))
     async def auto_reply_handler(event):
@@ -426,27 +427,54 @@ def register_ar(client, acc):
     return auto_reply_handler
 
 async def process_auto_reply_fast(event, client, acc, uid):
+    global _user_last_msg_time
     chat_id = event.chat_id
     message_text = event.message.text or ""
     if uid not in customer_count:
         customer_count[uid] = 0
     msg_count = customer_count[uid]
     
+    # Photo handling
     if event.message.photo or (event.message.document and event.message.document.mime_type and 'image' in event.message.document.mime_type):
         if get_setting('block_photo_enabled', True):
             asyncio.create_task(block_user_and_delete_photos(event, client, uid))
         else:
             asyncio.create_task(handle_payment_screenshot(event, client, uid))
         return
+    
     if not message_text.strip():
         return
-    msg_lower = message_text.lower().strip()
-    try:
-        input_chat = await event.get_input_chat()
-        await client(ReadHistoryRequest(peer=input_chat, max_id=event.message.id))
-    except:
-        pass
     
+    msg_lower = message_text.lower().strip()
+    
+    # ===== Multiple message detection =====
+    current_time = time.time()
+    last_time = _user_last_msg_time.get(uid, 0)
+    time_diff = current_time - last_time
+    _user_last_msg_time[uid] = current_time
+    
+    # If user sent messages rapidly (within 5 seconds), mark as seen only
+    if time_diff < 5 and msg_count > 0:
+        try:
+            input_chat = await event.get_input_chat()
+            await client(ReadHistoryRequest(peer=input_chat, max_id=event.message.id))
+        except:
+            pass
+        customer_count[uid] = msg_count + 1
+        logger.info(f"User {uid} rapid msg #{msg_count+1} - seen only")
+        return
+    
+    # ===== Wait time before processing =====
+    wait_time = int(get_setting('wait_time', 300))
+    if wait_time > 0:
+        try:
+            input_chat = await event.get_input_chat()
+            await client(ReadHistoryRequest(peer=input_chat, max_id=event.message.id))
+        except:
+            pass
+        await asyncio.sleep(wait_time)
+    
+    # ===== Typing simulation =====
     if get_setting('typing_enabled', True):
         typing_duration = int(get_setting('typing_duration', 240))
         if typing_duration > 0:
@@ -456,8 +484,11 @@ async def process_auto_reply_fast(event, client, acc, uid):
             except:
                 pass
     
+    # ===== First message - send both welcome messages =====
     if msg_count == 0 and get_setting('welcome_enabled', True):
         welcome_text = get_setting('welcome_message', '🔥 Welcome baby! 🔥')
+        
+        # Send first welcome with image
         if WELCOME_IMAGE_FILE.exists():
             try:
                 await client.send_file(chat_id, str(WELCOME_IMAGE_FILE), caption=welcome_text)
@@ -465,9 +496,23 @@ async def process_auto_reply_fast(event, client, acc, uid):
                 await client.send_message(chat_id, welcome_text)
         else:
             await client.send_message(chat_id, welcome_text)
+        
+        # Send second welcome (text only) after short delay
+        await asyncio.sleep(0.5)
+        second_welcome = get_setting('welcome_message_2', '🔥 I am available now! 😘\n\nTell me what you need?')
+        await client.send_message(chat_id, second_welcome)
+        
         customer_count[uid] = msg_count + 1
         return
     
+    # ===== Regular reply logic for subsequent messages =====
+    try:
+        input_chat = await event.get_input_chat()
+        await client(ReadHistoryRequest(peer=input_chat, max_id=event.message.id))
+    except:
+        pass
+    
+    # Check ignored messages
     ignored = get_setting('ignored_messages', '')
     if ignored:
         for line in ignored.split('\n'):
@@ -475,18 +520,36 @@ async def process_auto_reply_fast(event, client, acc, uid):
                 customer_count[uid] = msg_count + 1
                 return
     
+    # Check custom replies from replies.json
+    replies = load_json(REPLIES_FILE, [])
+    for r in replies:
+        kw = r.get('keyword', '').lower().strip()
+        if r.get('type', 'contains') == 'exact':
+            if msg_lower == kw:
+                await event.respond(r.get('reply', ''))
+                customer_count[uid] = msg_count + 1
+                return
+        else:
+            if kw and kw in msg_lower:
+                await event.respond(r.get('reply', ''))
+                customer_count[uid] = msg_count + 1
+                return
+    
+    # Payment keywords
     payment_keywords = ['pay', 'payment', 'qr', 'scan', 'upi', 'paytm', 'send', 'bhejo', 'screenshot', 'method', 'transfer', 'rupees', 'rs', 'money']
     if any(kw in msg_lower for kw in payment_keywords):
         await send_payment_info(client, chat_id, event)
         customer_count[uid] = msg_count + 1
         return
     
+    # Media keywords
     media_keywords = ['pic', 'photo', 'image', 'nude', 'naked', 'dikhao', 'show', 'nangi', 'boob', 'mms']
     if any(kw in msg_lower for kw in media_keywords):
         await event.respond(get_setting('media_keyword_reply', 'Payment first baby 😘🔥'))
         customer_count[uid] = msg_count + 1
         return
     
+    # Service keywords
     service_keywords = ['service', 'chahiye', 'kharid', 'demo', 'video', 'call', 'vc', 'price', 'rate']
     if any(kw in msg_lower for kw in service_keywords):
         price_text = get_setting('price_list_text', "🔥 10 MIN VC → ₹99\n🔥 20 MIN VC → ₹119")
@@ -496,12 +559,14 @@ async def process_auto_reply_fast(event, client, acc, uid):
         customer_count[uid] = msg_count + 1
         return
     
+    # Offline keywords
     offline_keywords = ['real', 'meet', 'aao', 'ghar', 'location', 'offline']
     if any(kw in msg_lower for kw in offline_keywords):
         await event.respond(get_setting('offline_keyword_reply', 'Online only baby 😊'))
         customer_count[uid] = msg_count + 1
         return
     
+    # Greeting keywords
     greeting_keywords = ['hi', 'hello', 'hey', 'hii', 'hy', 'hlo', 'hlw', 'helo']
     if any(w in msg_lower for w in greeting_keywords):
         greetings = get_setting('greeting_replies', ['Hi baby, ready! 🔥', 'Hey baby! 😘', 'Hello! What you need? 🔥'])
@@ -509,6 +574,7 @@ async def process_auto_reply_fast(event, client, acc, uid):
         customer_count[uid] = msg_count + 1
         return
     
+    # Default reply
     defaults = get_setting('default_replies', ['Ready baby! Pay karo! 🔥', 'Main ready hoon! 😘', 'Service ready! 💯'])
     await event.respond(random.choice(defaults))
     customer_count[uid] = msg_count + 1
@@ -566,7 +632,7 @@ async def handle_payment_screenshot(event, client, uid):
         logger.error(f"Payment ss failed: {e}")
 
 async def setup_auto_reply():
-    _load_settings_to_cache()
+    _load_settings()
     for acc in get_main_accounts():
         if acc['id'] not in [a['id'] for a in active_accounts]:
             client = await start_account(acc)
@@ -732,7 +798,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔥 **CONTROL PANEL** 🔥\n\nSelect an option below:", parse_mode='Markdown', reply_markup=main_keyboard())
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled, active_accounts
+    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -745,14 +811,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🔥 **CONTROL PANEL** 🔥\n\nSelect an option below:", parse_mode='Markdown', reply_markup=main_keyboard())
     
     elif data == "m_ar":
+        running = sum(1 for a in active_accounts if a.get('enabled', True))
+        total = len(active_accounts)
         status = "🟢 ACTIVE" if auto_reply_enabled else "🔴 STOPPED"
-        text = f"🤖 **AUTO REPLY**\n\nStatus: {status}\n\n▶️ Start All = সব একাউন্টের অটো রিপ্লাই চালু\n⏹️ Stop All = সব বন্ধ"
+        text = f"🤖 **AUTO REPLY**\n\nStatus: {status}\nRunning: {running}/{total}"
         kb = [
             [InlineKeyboardButton("▶️ START ALL", callback_data="ar_start")],
             [InlineKeyboardButton("⏹️ STOP ALL", callback_data="ar_stop")],
             [InlineKeyboardButton("👋 Welcome Msg + Pic", callback_data="ar_welcome")],
             [InlineKeyboardButton("🚫 Block Photo", callback_data="ar_blockphoto")],
             [InlineKeyboardButton("⌨️ Typing Time", callback_data="ar_typing")],
+            [InlineKeyboardButton("⏱️ Wait Time", callback_data="ar_waittime")],
             [InlineKeyboardButton("🚫 Ignored Msgs", callback_data="ar_ignore")],
             [InlineKeyboardButton("📝 Custom Replies", callback_data="ar_replies")],
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
@@ -770,12 +839,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ar_welcome":
         enabled = get_setting('welcome_enabled', True)
         status = "🟢 ON" if enabled else "🔴 OFF"
-        msg = get_setting('welcome_message', '🔥 Welcome baby! 🔥')
+        msg1 = get_setting('welcome_message', '🔥 Welcome baby! 🔥')
+        msg2 = get_setting('welcome_message_2', '🔥 I am available now! 😘')
         has_img = "✅" if WELCOME_IMAGE_FILE.exists() else "❌"
-        txt = f"👋 **Welcome Message**\n\nStatus: {status}\n\nText:\n`{msg}`\n\nImage: {has_img}"
+        txt = f"👋 **Welcome Message**\n\nStatus: {status}\n\n📝 Text 1 (with pic):\n`{msg1[:50]}...`\n\n📝 Text 2 (no pic):\n`{msg2[:50]}...`\n\nImage: {has_img}"
         kb = [
             [InlineKeyboardButton(f"{'🟢' if enabled else '🔴'} Toggle", callback_data="ar_welcome_tog")],
-            [InlineKeyboardButton("✏️ Change Text", callback_data="ar_welcome_edit")],
+            [InlineKeyboardButton("✏️ Edit Text 1 (with pic)", callback_data="ar_welcome_edit")],
+            [InlineKeyboardButton("✏️ Edit Text 2 (no pic)", callback_data="ar_welcome_edit2")],
             [InlineKeyboardButton("📷 Upload/Change Image", callback_data="ar_welcome_img")],
             [InlineKeyboardButton("🗑️ Remove Image", callback_data="ar_welcome_img_del")],
             [InlineKeyboardButton("🔙 Back", callback_data="m_ar")]
@@ -789,7 +860,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "ar_welcome_edit":
         context.user_data['await'] = 'welcome_text'
-        await query.edit_message_text("✏️ **Enter new Welcome Message Text:**\n\nSend the text now:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
+        await query.edit_message_text("✏️ **Enter new Welcome Message Text 1 (with image):**\n\nSend the text now:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
+    
+    elif data == "ar_welcome_edit2":
+        context.user_data['await'] = 'welcome_text_2'
+        await query.edit_message_text("✏️ **Enter new Welcome Message Text 2 (text only - no image):**\n\nSend the text now:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
     
     elif data == "ar_welcome_img":
         context.user_data['await'] = 'welcome_image'
@@ -837,6 +912,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ar_typing_time":
         context.user_data['await'] = 'typing_time'
         await query.edit_message_text(f"⏱️ **Enter Typing Time (seconds):**\n\nCurrent: {get_setting('typing_duration', 240)}\n\nRange: 0-300\n\nEx: 60 = 1 মিনিট\n240 = 4 মিনিট", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_typing")]]))
+    
+    elif data == "ar_waittime":
+        current = int(get_setting('wait_time', 300))
+        txt = f"⏱️ **Wait Time Before Reply**\n\nCurrent: {current} seconds ({current//60} minutes)\n\nইউজার মেসেজ পাঠানোর পর এত সময় অপেক্ষা করবে তারপর টাইপিং শুরু করবে।\n\nRange: 0-600 seconds (0-10 min)"
+        kb = [
+            [InlineKeyboardButton("0s", callback_data="wt_0"), InlineKeyboardButton("60s", callback_data="wt_60")],
+            [InlineKeyboardButton("120s", callback_data="wt_120"), InlineKeyboardButton("300s", callback_data="wt_300")],
+            [InlineKeyboardButton("Custom", callback_data="wt_custom")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_ar")]
+        ]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+    
+    elif data.startswith("wt_"):
+        val = data.split("_")[1]
+        if val == "custom":
+            context.user_data['await'] = 'wait_time'
+            await query.edit_message_text(f"⏱️ Enter wait time in seconds:\n\nCurrent: {get_setting('wait_time', 300)}s\n\nEx: 300 = 5 min", 
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_waittime")]]))
+        else:
+            set_setting('wait_time', int(val))
+            await query.edit_message_text(f"✅ Wait time set to {val}s!", 
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_waittime")]]))
     
     elif data == "ar_ignore":
         context.user_data['await'] = 'ignore'
@@ -1034,7 +1131,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await account_clients[aid].disconnect()
             except: pass
             del account_clients[aid]
-        active_accounts = [x for x in active_accounts if x['id'] != aid]
+        active_accounts[:] = [x for x in active_accounts if x['id'] != aid]
         for d in [account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active]:
             if aid in d: del d[aid]
         remove_account_data(aid)
@@ -1205,7 +1302,21 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if await_state == 'welcome_text':
         set_setting('welcome_message', text)
         context.user_data.pop('await', None)
-        await update.message.reply_text("✅ Welcome message updated!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
+        await update.message.reply_text("✅ Welcome message 1 updated!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
+
+    elif await_state == 'welcome_text_2':
+        set_setting('welcome_message_2', text)
+        context.user_data.pop('await', None)
+        await update.message.reply_text("✅ Welcome message 2 updated!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
+    
+    elif await_state == 'wait_time':
+        try:
+            val = max(0, min(600, int(text)))
+            set_setting('wait_time', val)
+            context.user_data.pop('await', None)
+            await update.message.reply_text(f"✅ Wait time set to {val}s!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_waittime")]]))
+        except:
+            await update.message.reply_text("❌ Enter a number (0-600)!")
 
     elif await_state == 'typing_time':
         try:
@@ -1480,7 +1591,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             await update.message.reply_text(f"❌ Invalid session: {str(e)[:100]}")
         finally:
-            context.user_data.pop('await', None)
+            if 'context' in dir():
+                context.user_data.pop('await', None)
 
     elif await_state == 'ac_bk_ss':
         if len(text) < 10:
@@ -1570,7 +1682,7 @@ async def add_reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_json(REPLIES_FILE, replies)
             await update.message.reply_text(f"✅ Reply updated for `{keyword}`", parse_mode='Markdown')
             return
-    replies.append({'keyword': keyword, 'reply': reply, 'added_at': datetime.now().isoformat()})
+    replies.append({'keyword': keyword, 'reply': reply, 'type': 'contains', 'added_at': datetime.now().isoformat()})
     save_json(REPLIES_FILE, replies)
     await update.message.reply_text(f"✅ Reply added for `{keyword}`", parse_mode='Markdown')
 
@@ -1592,12 +1704,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /help - This message
 
 **FEATURES:**
-• Auto Reply with custom messages
+• Auto Reply with wait time + typing
+• Multiple message detection (rapid msgs seen only)
+• Welcome Message 1 (with image) + Message 2 (text only)
 • Group Spam with speed control
-• Welcome message + image
 • QR code payment
 • Block photo feature
-• Typing effect
 • Account mgmt via bot
 • Backup accounts auto-activate
 """
@@ -1623,7 +1735,7 @@ async def main_async():
     global ptb_application, bot_ready, bot_event_loop
 
     bot_event_loop = asyncio.get_event_loop()
-    _load_settings_to_cache()
+    _load_settings()
 
     # ─── Setup PTB ───
     ptb = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
