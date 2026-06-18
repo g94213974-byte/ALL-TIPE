@@ -1137,8 +1137,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(f"📷 QR Code {has_qr}", callback_data="st_qr")],
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
-        await query.edit_message_text("⚙️ **Settings**\n
-        elif data == "m_set":
+        await query.edit_message_text("⚙️ **Settings**\nelif data == "m_set":
             # Settings menu
             settings = load_settings()
             m = "🔧 *Settings*\n\n"
