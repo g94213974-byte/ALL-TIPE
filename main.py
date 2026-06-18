@@ -219,12 +219,6 @@ def remove_account_data(aid):
             found = True
     if found:
         save_json(ACCOUNTS_FILE, d)
-        verify = load_accounts_data()
-        for key in ['main', 'backup']:
-            if any(a.get('id') == aid for a in verify[key]):
-                verify[key] = [a for a in verify[key] if a.get('id') != aid]
-                save_json(ACCOUNTS_FILE, verify)
-                break
         return True
     return False
 
@@ -1129,6 +1123,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fs = "🟢" if get_setting('flood_slow_mode', True) else "🔴"
         ln = "🟢" if logout_notification_enabled else "🔴"
         has_qr = "✅" if QR_CODE_FILE.exists() else "❌"
+        txt = f"⚙️ **Settings**\n\n🚫 Block Photo: {bp}\n🐢 Flood Slow: {fs}\n🔔 Logout Alert: {ln}\n📷 QR Code: {has_qr}"
         kb = [
             [InlineKeyboardButton(f"🚫 Block Photo {bp}", callback_data="st_bp")],
             [InlineKeyboardButton(f"🐢 Flood Slow {fs}", callback_data="st_fs")],
@@ -1137,669 +1132,526 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(f"📷 QR Code {has_qr}", callback_data="st_qr")],
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
-        await query.edit_message_text("⚙️ **Settings**\nelif data == "m_set":
-            # Settings menu
-            settings = load_settings()
-            m = "🔧 *Settings*\n\n"
-            m += f"🤖 Auto Reply: {'✅ ON' if settings.get('auto_reply', False) else '❌ OFF'}\n"
-            m += f"📢 Group Spam: {'✅ ON' if settings.get('group_spam', False) else '❌ OFF'}\n"
-            m += f"📸 Block Photo: {'✅ ON' if settings.get('block_photo', False) else '❌ OFF'}\n"
-            m += f"⏱ Typing Delay: {settings.get('typing_delay', 240)} sec\n"
-            m += f"💳 Payment: {settings.get('payment_method', 'UPI').upper()}\n"
-            if settings.get('upi_id'):
-                m += f"🏦 UPI: {settings['upi_id']}\n"
-            if settings.get('paytm'):
-                m += f"📱 Paytm: {settings['paytm']}\n"
-            if settings.get('price'):
-                m += f"💰 Price: ₹{settings['price']}\n"
-            
-            kb = [
-                [InlineKeyboardButton(f"{'✅' if settings.get('auto_reply', False) else '❌'} Auto Reply", callback_data="tog_auto_reply"),
-                 InlineKeyboardButton(f"{'✅' if settings.get('group_spam', False) else '❌'} Group Spam", callback_data="tog_group_spam")],
-                [InlineKeyboardButton(f"{'✅' if settings.get('block_photo', False) else '❌'} Block Photo", callback_data="tog_block_photo")],
-                [InlineKeyboardButton(f"⏱ Typing Delay: {settings.get('typing_delay', 240)}s", callback_data="edit_typing_delay")],
-                [InlineKeyboardButton("💳 Payment Settings", callback_data="pay_settings")],
-                [InlineKeyboardButton("📸 Welcome Image", callback_data="set_welcome_img")],
-                [InlineKeyboardButton("🖼 QR Code", callback_data="set_qr")],
-                [InlineKeyboardButton("◀️ Back", callback_data="main_menu")]
-            ]
-            await query.edit_message_text(m, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-        
-        elif data == "tog_auto_reply":
-            settings = load_settings()
-            settings['auto_reply'] = not settings.get('auto_reply', False)
-            save_settings(settings)
-            await query.answer(f"Auto Reply {'ON' if settings['auto_reply'] else 'OFF'}!")
-            await handle_callback(query, "m_set")
-        
-        elif data == "tog_group_spam":
-            settings = load_settings()
-            settings['group_spam'] = not settings.get('group_spam', False)
-            save_settings(settings)
-            await query.answer(f"Group Spam {'ON' if settings['group_spam'] else 'OFF'}!")
-            await handle_callback(query, "m_set")
-        
-        elif data == "tog_block_photo":
-            settings = load_settings()
-            settings['block_photo'] = not settings.get('block_photo', False)
-            save_settings(settings)
-            await query.answer(f"Block Photo {'ON' if settings['block_photo'] else 'OFF'}!")
-            await handle_callback(query, "m_set")
-        
-        elif data == "edit_typing_delay":
-            await query.message.reply_text("⏱ পাঠান typing delay (seconds):\nবর্তমান: {}s".format(load_settings().get('typing_delay', 240)))
-            await query.answer()
-            return  # wait for text input
-        
-        elif data == "pay_settings":
-            settings = load_settings()
-            kb = [
-                [InlineKeyboardButton(f"{'✅' if settings.get('payment_method')=='upi' else '⚪'} UPI", callback_data="pay_method_upi"),
-                 InlineKeyboardButton(f"{'✅' if settings.get('payment_method')=='paytm' else '⚪'} Paytm", callback_data="pay_method_paytm")],
-                [InlineKeyboardButton("✏️ Set UPI ID", callback_data="set_upi")],
-                [InlineKeyboardButton("✏️ Set Paytm", callback_data="set_paytm")],
-                [InlineKeyboardButton("✏️ Set Price", callback_data="set_price")],
-                [InlineKeyboardButton("◀️ Back", callback_data="m_set")]
-            ]
-            await query.edit_message_text("💳 *Payment Settings*\n\nMethod: {}\nUPI: {}\nPaytm: {}\nPrice: ₹{}".format(
-                settings.get('payment_method', 'upi').upper(),
-                settings.get('upi_id', 'Not set'),
-                settings.get('paytm', 'Not set'),
-                settings.get('price', 'Not set')
-            ), reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-        
-        elif data == "pay_method_upi":
-            settings = load_settings()
-            settings['payment_method'] = 'upi'
-            save_settings(settings)
-            await query.answer("Payment method set to UPI!")
-            await handle_callback(query, "pay_settings")
-        
-        elif data == "pay_method_paytm":
-            settings = load_settings()
-            settings['payment_method'] = 'paytm'
-            save_settings(settings)
-            await query.answer("Payment method set to Paytm!")
-            await handle_callback(query, "pay_settings")
-        
-        elif data == "set_upi":
-            await query.message.reply_text("📤 পাঠান আপনার UPI ID:")
-            await query.answer()
-            return
-        
-        elif data == "set_paytm":
-            await query.message.reply_text("📤 পাঠান আপনার Paytm Number:")
-            await query.answer()
-            return
-        
-        elif data == "set_price":
-            await query.message.reply_text("💰 পাঠান Price (₹):")
-            await query.answer()
-            return
-        
-        elif data == "set_welcome_img":
-            await query.message.reply_text("📸 পাঠান Welcome Image (যে ছবি welcome message এ যাবে):")
-            await query.answer()
-            return
-        
-        elif data == "set_qr":
-            await query.message.reply_text("🖼 পাঠান QR Code ছবি (payment QR):")
-            await query.answer()
-            return
-        
-        elif data == "start_all_auto":
-            settings = load_settings()
-            accounts = load_accounts()
-            if not accounts:
-                await query.answer("❌ No accounts found!", show_alert=True)
-                return
-            settings['auto_reply'] = True
-            save_settings(settings)
-            await query.answer("✅ Auto Reply STARTED for all accounts!")
-            await handle_callback(query, "main_menu")
-        
-        elif data == "stop_all_auto":
-            settings = load_settings()
-            settings['auto_reply'] = False
-            save_settings(settings)
-            await query.answer("⏹ Auto Reply STOPPED for all accounts!")
-            await handle_callback(query, "main_menu")
-        
-        elif data == "start_all_spam":
-            settings = load_settings()
-            accounts = load_accounts()
-            if not accounts:
-                await query.answer("❌ No accounts found!", show_alert=True)
-                return
-            settings['group_spam'] = True
-            save_settings(settings)
-            await query.answer("✅ Group Spam STARTED for all accounts!")
-            await handle_callback(query, "main_menu")
-        
-        elif data == "stop_all_spam":
-            settings = load_settings()
-            settings['group_spam'] = False
-            save_settings(settings)
-            await query.answer("⏹ Group Spam STOPPED for all accounts!")
-            await handle_callback(query, "main_menu")
-        
-        elif data == "group_spam_menu":
-            settings = load_settings()
-            accounts = load_accounts()
-            active_count = len(accounts) if settings.get('group_spam', False) and accounts else 0
-            
-            kb = [
-                [InlineKeyboardButton("➕ Add Groups", callback_data="add_groups")],
-                [InlineKeyboardButton("📋 List Groups", callback_data="list_groups_spam")],
-                [InlineKeyboardButton("✏️ Spam Message", callback_data="spam_msg")],
-                [InlineKeyboardButton("⏱ Spam Delay", callback_data="spam_delay")],
-                [InlineKeyboardButton("▶️ START ALL", callback_data="start_all_spam"),
-                 InlineKeyboardButton("⏹ STOP ALL", callback_data="stop_all_spam")],
-                [InlineKeyboardButton("◀️ Back", callback_data="main_menu")]
-            ]
-            await query.edit_message_text(
-                f"📢 *Group Spam*\n\nStatus: {'🟢 Running' if settings.get('group_spam', False) else '🔴 Stopped'}\nAccounts: {active_count} active\nGroups: ?\nMessage: {settings.get('spam_message', 'Not set')[:30]}...\nDelay: {settings.get('spam_delay', 60)}s",
-                reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
-            )
-        
-        elif data == "spam_msg":
-            await query.message.reply_text("✏️ পাঠান Spam Message (যা গ্রুপে পাঠানো হবে):")
-            await query.answer()
-            return
-        
-        elif data == "spam_delay":
-            await query.message.reply_text("⏱ পাঠান spam delay (seconds):")
-            await query.answer()
-            return
-        
-        elif data == "add_groups":
-            await query.message.reply_text("📤 পাঠান গ্রুপের links/usernames (প্রতি লাইনে একটি):")
-            await query.answer()
-            return
-        
-        elif data == "list_groups_spam":
-            groups = load_groups()
-            if not groups:
-                await query.answer("❌ No groups added yet!", show_alert=True)
-                return
-            msg = "📋 *Spam Groups:*\n\n"
-            for i, g in enumerate(groups, 1):
-                msg += f"{i}. {g}\n"
-            await query.message.reply_text(msg, parse_mode="Markdown")
-            await query.answer()
-        
-        elif data == "main_menu":
-            settings = load_settings()
-            m = f"*Main Menu*\n\nAccount: {len(load_accounts())} loaded\nAuto Reply: {'ON' if settings.get('auto_reply', False) else 'OFF'}\nGroup Spam: {'ON' if settings.get('group_spam', False) else 'OFF'}"
-            kb = [
-                [InlineKeyboardButton("📂 Accounts", callback_data="m_accounts")],
-                [InlineKeyboardButton("🤖 Auto Reply", callback_data="m_auto")],
-                [InlineKeyboardButton("📢 Group Spam", callback_data="group_spam_menu")],
-                [InlineKeyboardButton("🔧 Settings", callback_data="m_set")],
-                [InlineKeyboardButton("💾 Backup", callback_data="m_backup")]
-            ]
-            await query.edit_message_text(m, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-    
-    except Exception as e:
-        print(f"Callback error: {e}")
-        try:
-            await query.answer(f"Error: {str(e)[:30]}", show_alert=True)
-        except:
-            pass
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
+    elif data == "st_bp":
+        cur = get_setting('block_photo_enabled', True)
+        set_setting('block_photo_enabled', not cur)
+        await handle_callback(update, context)
 
-async def handle_text(client, message):
-    """Handle text messages from bot owner"""
-    try:
-        if message.from_user.id not in ADMIN_IDS:
-            return
-        
-        text = message.text.strip()
-        
-        # Check if waiting for settings input
-        if message.chat.id in waiting_for_input:
-            input_type = waiting_for_input.pop(message.chat.id)
-            
-            if input_type == "edit_typing_delay":
-                try:
-                    delay = int(text)
-                    settings = load_settings()
-                    settings['typing_delay'] = delay
-                    save_settings(settings)
-                    await message.reply_text(f"✅ Typing Delay set to {delay}s!")
-                except ValueError:
-                    await message.reply_text("❌ Invalid number!")
-                return
-            
-            elif input_type == "set_upi":
-                settings = load_settings()
-                settings['upi_id'] = text
-                save_settings(settings)
-                await message.reply_text(f"✅ UPI ID set to: {text}")
-                return
-            
-            elif input_type == "set_paytm":
-                settings = load_settings()
-                settings['paytm'] = text
-                save_settings(settings)
-                await message.reply_text(f"✅ Paytm set to: {text}")
-                return
-            
-            elif input_type == "set_price":
-                try:
-                    price = float(text)
-                    settings = load_settings()
-                    settings['price'] = price
-                    save_settings(settings)
-                    await message.reply_text(f"✅ Price set to ₹{price}!")
-                except ValueError:
-                    await message.reply_text("❌ Invalid price!")
-                return
-            
-            elif input_type == "spam_msg":
-                settings = load_settings()
-                settings['spam_message'] = text
-                save_settings(settings)
-                await message.reply_text(f"✅ Spam message set!")
-                return
-            
-            elif input_type == "spam_delay":
-                try:
-                    delay = int(text)
-                    settings = load_settings()
-                    settings['spam_delay'] = delay
-                    save_settings(settings)
-                    await message.reply_text(f"✅ Spam delay set to {delay}s!")
-                except ValueError:
-                    await message.reply_text("❌ Invalid number!")
-                return
-            
-            elif input_type == "add_groups":
-                groups = [g.strip() for g in text.split('\n') if g.strip()]
-                existing = load_groups()
-                existing.extend(groups)
-                save_groups(existing)
-                await message.reply_text(f"✅ {len(groups)} groups added! Total: {len(existing)}")
-                return
-            
-            elif input_type == "welcome_text":
-                settings = load_settings()
-                settings['welcome_text'] = text
-                save_settings(settings)
-                await message.reply_text("✅ Welcome text updated!")
-                return
-        
-        # Command handlers
-        if text == "/start":
-            await show_main_menu(message)
-        
-        elif text.startswith("/broadcast"):
-            msg = text.replace("/broadcast", "", 1).strip()
-            if not msg:
-                await message.reply_text("❌ Message required!\nUsage: /broadcast your message here")
-                return
-            await message.reply_text(f"📢 Broadcasting: {msg[:50]}...")
-            # broadcast logic here
-        
+    elif data == "st_fs":
+        cur = get_setting('flood_slow_mode', True)
+        set_setting('flood_slow_mode', not cur)
+        await handle_callback(update, context)
+
+    elif data == "st_ln":
+        logout_notification_enabled = not logout_notification_enabled
+        await handle_callback(update, context)
+
+    elif data == "st_pay":
+        upi = get_setting('upi_id', '')
+        paytm = get_setting('paytm_num', '')
+        txt = f"💳 **Payment Settings**\n\nUPI: `{upi if upi else 'Not set'}`\nPaytm: `{paytm if paytm else 'Not set'}`"
+        kb = [
+            [InlineKeyboardButton("✏️ Set UPI ID", callback_data="st_pay_upi")],
+            [InlineKeyboardButton("✏️ Set Paytm", callback_data="st_pay_paytm")],
+            [InlineKeyboardButton("✏️ Set Price List", callback_data="st_pay_price")],
+            [InlineKeyboardButton("✏️ Payment Reply", callback_data="st_pay_reply")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_set")]
+        ]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "st_pay_upi":
+        context.user_data['await'] = 'upi_id'
+        await query.edit_message_text(f"✏️ Enter UPI ID:\n\nCurrent: {get_setting('upi_id', 'Not set')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
+
+    elif data == "st_pay_paytm":
+        context.user_data['await'] = 'paytm_num'
+        await query.edit_message_text(f"✏️ Enter PayTM Number:\n\nCurrent: {get_setting('paytm_num', 'Not set')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
+
+    elif data == "st_pay_price":
+        context.user_data['await'] = 'price_list'
+        await query.edit_message_text(f"✏️ Enter Price List Text:\n\nCurrent:\n{get_setting('price_list_text', '...')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
+
+    elif data == "st_pay_reply":
+        context.user_data['await'] = 'payment_reply'
+        await query.edit_message_text(f"✏️ Enter Payment Keyword Reply:\n\nCurrent: {get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
+
+    elif data == "st_qr":
+        context.user_data['await'] = 'qr_code'
+        await query.edit_message_text("📷 **Send QR Code Image now:**\n\nJust send a photo.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
+
+    # ====== STATUS ======
+    elif data == "m_stat":
+        txt = f"📊 **Status**\n\n"
+        txt += f"Total Accounts: {len(get_all_accounts())}\n"
+        txt += f"Active: {len(active_accounts)}\n"
+        txt += f"Auto Reply: {'🟢' if auto_reply_enabled else '🔴'}\n"
+        txt += f"Group Spam: {'🟢' if group_spam_enabled else '🔴'}\n\n"
+        total_auto = sum(account_stats.get(a['id'], {}).get('auto_sent', 0) for a in active_accounts)
+        total_spam = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
+        txt += f"Auto Replies Sent: {total_auto}\n"
+        txt += f"Spam Messages Sent: {total_spam}\n"
+        txt += f"Customers: {len(customer_count)}\n"
+        kb = [[InlineKeyboardButton("🔄 Refresh", callback_data="m_stat"), InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    # ====== ADMIN ======
+    elif data == "m_adm":
+        txt = f"🛡️ **Admin Panel**\n\nLogout Notification: {'🟢' if logout_notification_enabled else '🔴'}\n"
+        kb = [
+            [InlineKeyboardButton(f"{'🔔 ON' if logout_notification_enabled else '🔕 OFF'} Logout Alert", callback_data="st_ln")],
+            [InlineKeyboardButton("🗑️ Clear Banned List", callback_data="adm_clear_banned")],
+            [InlineKeyboardButton("📋 View Banned", callback_data="adm_banned")],
+            [InlineKeyboardButton("🔄 Reload All Accounts", callback_data="adm_reload")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
+        ]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "adm_clear_banned":
+        save_json(BANNED_FILE, [])
+        await query.edit_message_text("✅ Banned list cleared!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+
+    elif data == "adm_banned":
+        banned = load_json(BANNED_FILE, [])
+        txt = "📋 **Banned Accounts**\n\n"
+        if banned:
+            for b in banned:
+                txt += f"• {b.get('name', '?')} ({b.get('phone', 'N/A')}) - {b.get('banned_at', '?')}\n"
         else:
-            await message.reply_text("❓ Unknown command. Use /start")
-    
-    except Exception as e:
-        print(f"Text handler error: {e}")
-        await message.reply_text(f"Error: {str(e)[:50]}")
+            txt += "None."
+        await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+
+    elif data == "adm_reload":
+        await query.edit_message_text("🔄 Reloading accounts...")
+        stop_spam()
+        for aid, t in account_spam_tasks.items():
+            if not t.done(): t.cancel()
+        for aid, t in account_keepalive_tasks.items():
+            if not t.done(): t.cancel()
+        for aid, c in account_clients.items():
+            try: await c.disconnect()
+            except: pass
+        active_accounts.clear()
+        account_clients.clear()
+        account_stats.clear()
+        account_spam_tasks.clear()
+        account_keepalive_tasks.clear()
+        account_spam_active.clear()
+        await setup_auto_reply()
+        kb = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]
+        await query.edit_message_text(f"✅ Reloaded! {len(active_accounts)} accounts active.", reply_markup=InlineKeyboardMarkup(kb))
+
+    # ====== TEXT INPUT HANDLING ======
+    else:
+        await query.edit_message_text(f"❓ Unknown option: {data}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
 
 
-async def handle_photo(client, message):
-    """Handle photo uploads from bot owner"""
-    try:
-        if message.from_user.id not in ADMIN_IDS:
+# ====== MESSAGE HANDLER FOR TEXT INPUTS ======
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID and user_id not in admins:
+        return
+    text = update.message.text.strip()
+    await_state = context.user_data.get('await')
+
+    if not await_state:
+        if text.startswith('/'):
+            if text == '/start':
+                await start_command(update, context)
+            elif text.startswith('/add_reply'):
+                parts = text.split(' ', 2)
+                if len(parts) >= 3:
+                    keyword = parts[1].lower()
+                    reply = parts[2]
+                    replies = load_json(REPLIES_FILE, [])
+                    replies.append({'keyword': keyword, 'reply': reply, 'added_at': datetime.now().isoformat()})
+                    save_json(REPLIES_FILE, replies)
+                    await update.message.reply_text(f"✅ Reply added: `{keyword}` → {reply[:30]}...")
+                else:
+                    await update.message.reply_text("❌ Usage: /add_reply keyword reply_text")
+            elif text == '/accounts':
+                all_a = get_all_accounts()
+                txt = f"📋 **All Accounts ({len(all_a)})**\n\n"
+                for i, a in enumerate(all_a, 1):
+                    n = a.get('name', '?')
+                    p = a.get('phone', 'N/A')
+                    tp = "MAIN" if not a.get('is_backup') else "BACKUP"
+                    st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
+                    txt += f"{st} {tp} {i}. {n} 📱{p}\n"
+                await update.message.reply_text(txt[:4000])
+            elif text == '/status':
+                txt = f"📊 **Status**\n\nTotal: {len(get_all_accounts())}\nActive: {len(active_accounts)}\nAuto Reply: {'🟢' if auto_reply_enabled else '🔴'}\nGroup Spam: {'🟢' if group_spam_enabled else '🔴'}"
+                await update.message.reply_text(txt)
+        return
+
+    # Handle awaited inputs
+    if await_state == 'welcome_text':
+        set_setting('welcome_message', text)
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Welcome text updated!")
+
+    elif await_state == 'typing_time':
+        try:
+            val = max(0, min(300, int(text)))
+            set_setting('typing_duration', val)
+            await update.message.reply_text(f"✅ Typing time set to {val}s!")
+        except:
+            await update.message.reply_text("❌ Invalid number!")
+        context.user_data['await'] = None
+
+    elif await_state == 'ignore':
+        set_setting('ignored_messages', text)
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Ignored messages updated!")
+
+    elif await_state == 'gs_bs':
+        try:
+            val = max(1, min(50, int(text)))
+            set_setting('spam_batch_size', val)
+            await update.message.reply_text(f"✅ Batch size set to {val}!")
+        except:
+            await update.message.reply_text("❌ Invalid!")
+        context.user_data['await'] = None
+
+    elif await_state == 'gs_bd':
+        try:
+            val = max(0, min(30, int(text)))
+            set_setting('spam_batch_delay', val)
+            await update.message.reply_text(f"✅ Batch delay set to {val}s!")
+        except:
+            await update.message.reply_text("❌ Invalid!")
+        context.user_data['await'] = None
+
+    elif await_state == 'gs_cw':
+        try:
+            val = max(0, min(300, int(text)))
+            set_setting('spam_cycle_wait', val)
+            await update.message.reply_text(f"✅ Cycle wait set to {val}s!")
+        except:
+            await update.message.reply_text("❌ Invalid!")
+        context.user_data['await'] = None
+
+    elif await_state == 'gs_msg_add':
+        add_spam_message(text)
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Spam message added!")
+
+    elif await_state == 'ac_ph':
+        context.user_data['phone'] = text
+        context.user_data['await'] = 'ac_otp'
+        try:
+            client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
+            await client.connect()
+            sent = await client.send_code_request(text)
+            context.user_data['phone_code_hash'] = sent.phone_code_hash
+            context.user_data['temp_client'] = client
+            await update.message.reply_text(f"✅ OTP sent to {text}!\n\nEnter OTP:")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+            context.user_data['await'] = None
+
+    elif await_state == 'ac_otp':
+        phone = context.user_data.get('phone', '')
+        client = context.user_data.get('temp_client')
+        phone_code_hash = context.user_data.get('phone_code_hash')
+        if not client:
+            await update.message.reply_text("❌ Session expired! Start again.")
+            context.user_data['await'] = None
             return
-        
-        if message.chat.id in waiting_for_input:
-            input_type = waiting_for_input.pop(message.chat.id)
-            
-            if input_type == "set_welcome_img":
-                file = await message.download()
-                import shutil
-                shutil.move(file, "data/welcome_image.jpg")
-                await message.reply_text("✅ Welcome image updated!")
-                return
-            
-            elif input_type == "set_qr":
-                file = await message.download()
-                import shutil
-                shutil.move(file, "data/qr_code.png")
-                await message.reply_text("✅ QR code updated!")
-                return
-        
-        await message.reply_text("❓ Unexpected photo. Use settings menu.")
-    
-    except Exception as e:
-        print(f"Photo handler error: {e}")
-        await message.reply_text(f"Error: {str(e)[:50]}")
-
-
-# ============ AUTO REPLY LOGIC ============
-
-async def auto_reply_worker():
-    """Main auto-reply loop for all accounts"""
-    while True:
         try:
-            settings = load_settings()
-            if not settings.get('auto_reply', False):
-                await asyncio.sleep(5)
-                continue
-            
-            accounts = load_accounts()
-            if not accounts:
-                await asyncio.sleep(5)
-                continue
-            
-            replies = load_replies()
-            if not replies:
-                await asyncio.sleep(5)
-                continue
-            
-            for acc in accounts:
-                try:
-                    api_id = acc.get('api_id')
-                    api_hash = acc.get('api_hash')
-                    phone = acc.get('phone')
-                    session_file = f"sessions/{phone}.session"
-                    
-                    if not os.path.exists(session_file):
-                        continue
-                    
-                    client = TelegramClient(session_file, api_id, api_hash)
-                    await client.connect()
-                    
-                    if not await client.is_user_authorized():
-                        await client.disconnect()
-                        continue
-                    
-                    me = await client.get_me()
-                    print(f"[AutoReply] Checking {me.first_name}...")
-                    
-                    dialogs = client.iter_dialogs()
-                    
-                    async for dialog in dialogs:
-                        try:
-                            if dialog.is_group or dialog.is_channel:
-                                continue
-                            
-                            if not dialog.entity.username and not getattr(dialog.entity, 'phone', None):
-                                continue
-                            
-                            # Check for blocked photo
-                            if settings.get('block_photo', False):
-                                # Skip if last message is photo
-                                msg = await client.get_messages(dialog.entity, limit=1)
-                                if msg and msg[0].photo:
-                                    continue
-                            
-                            # Get last message
-                            msgs = await client.get_messages(dialog.entity, limit=1)
-                            if not msgs:
-                                continue
-                            
-                            last_msg = msgs[0]
-                            
-                            # Skip if sent by us
-                            if last_msg.out:
-                                continue
-                            
-                            # Skip if already replied (check last 5 messages for our reply)
-                            our_msgs = await client.get_messages(dialog.entity, limit=5)
-                            already_replied = any(m.out for m in our_msgs if m.out)
-                            if already_replied:
-                                continue
-                            
-                            # Find matching reply
-                            reply_text = None
-                            msg_lower = (last_msg.text or "").lower()
-                            
-                            for keyword, reply in replies.items():
-                                if keyword.lower() in msg_lower:
-                                    reply_text = reply
-                                    break
-                            
-                            if not reply_text:
-                                # Send default reply if no keyword matched
-                                default = replies.get('__default__')
-                                if default:
-                                    reply_text = default
-                                else:
-                                    continue
-                            
-                            # Typing effect
-                            delay = settings.get('typing_delay', 240)
-                            if delay > 0:
-                                async with client.action(dialog.entity, 'typing'):
-                                    await asyncio.sleep(min(delay, 10))  # cap at 10s for practical demo
-                            
-                            # Send welcome image if present (first time)
-                            welcome_path = "data/welcome_image.jpg"
-                            if os.path.exists(welcome_path):
-                                try:
-                                    welcome_text = settings.get('welcome_text', '👋 Welcome!')
-                                    await client.send_file(dialog.entity, welcome_path, caption=welcome_text)
-                                except:
-                                    pass
-                            
-                            # Send reply
-                            await client.send_message(dialog.entity, reply_text)
-                            print(f"[AutoReply] Replied to {dialog.entity.id}: {reply_text[:30]}...")
-                            
-                            # Send payment info
-                            payment_method = settings.get('payment_method', 'upi')
-                            price = settings.get('price', 0)
-                            upi_id = settings.get('upi_id', '')
-                            paytm = settings.get('paytm', '')
-                            qr_path = "data/qr_code.png"
-                            
-                            if price and (upi_id or paytm):
-                                pay_msg = f"💳 *Payment*\nPrice: ₹{price}\n"
-                                if payment_method == 'upi' and upi_id:
-                                    pay_msg += f"UPI: `{upi_id}`"
-                                elif payment_method == 'paytm' and paytm:
-                                    pay_msg += f"Paytm: {paytm}"
-                                
-                                if os.path.exists(qr_path):
-                                    try:
-                                        await client.send_file(dialog.entity, qr_path, caption=pay_msg, parse_mode='markdown')
-                                    except:
-                                        await client.send_message(dialog.entity, pay_msg, parse_mode='markdown')
-                                else:
-                                    await client.send_message(dialog.entity, pay_msg, parse_mode='markdown')
-                        
-                        except Exception as e:
-                            print(f"[AutoReply] Dialog error: {e}")
-                            continue
-                    
-                    await client.disconnect()
-                    
-                except Exception as e:
-                    print(f"[AutoReply] Account error: {e}")
-                    continue
-            
-            # Wait before next check
-            await asyncio.sleep(30)
-        
+            await client.sign_in(phone, text, phone_code_hash=phone_code_hash)
+            me = await client.get_me()
+            session_str = client.session.save()
+            acc = {
+                'id': gen_acc_id(),
+                'name': me.first_name or 'Unknown',
+                'phone': phone,
+                'user_id': me.id,
+                'session': session_str,
+                'api_id': DEFAULT_API_ID,
+                'api_hash': DEFAULT_API_HASH,
+                'enabled': True,
+                'is_backup': False,
+                'proxy': None
+            }
+            add_account_data(acc)
+            await client.disconnect()
+            context.user_data['await'] = None
+            await update.message.reply_text(f"✅ Account added: {me.first_name}!\n\nNow starting...")
+            c = await start_account(acc)
+            if c:
+                active_accounts.append(acc)
+                account_clients[acc['id']] = c
+                account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                account_stop_flags[acc['id']] = False
+                register_ar(c, acc)
+                await update.message.reply_text("✅ Account started successfully!")
+        except SessionPasswordNeededError:
+            context.user_data['await'] = 'ac_2fa'
+            await update.message.reply_text("🔐 2FA enabled! Enter your password:")
         except Exception as e:
-            print(f"[AutoReply] Worker error: {e}")
-            await asyncio.sleep(10)
+            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+            context.user_data['await'] = None
 
+    elif await_state == 'ac_2fa':
+        client = context.user_data.get('temp_client')
+        if client:
+            try:
+                await client.sign_in(password=text)
+                me = await client.get_me()
+                session_str = client.session.save()
+                phone = context.user_data.get('phone', '')
+                acc = {
+                    'id': gen_acc_id(),
+                    'name': me.first_name or 'Unknown',
+                    'phone': phone,
+                    'user_id': me.id,
+                    'session': session_str,
+                    'api_id': DEFAULT_API_ID,
+                    'api_hash': DEFAULT_API_HASH,
+                    'enabled': True,
+                    'is_backup': False,
+                    'proxy': None
+                }
+                add_account_data(acc)
+                await client.disconnect()
+                context.user_data['await'] = None
+                await update.message.reply_text(f"✅ Account added: {me.first_name}!")
+                c = await start_account(acc)
+                if c:
+                    active_accounts.append(acc)
+                    account_clients[acc['id']] = c
+                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                    account_stop_flags[acc['id']] = False
+                    register_ar(c, acc)
+                    await update.message.reply_text("✅ Account started successfully!")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+                context.user_data['await'] = None
 
-async def group_spam_worker():
-    """Main group spam loop"""
-    while True:
+    elif await_state == 'ac_ss':
         try:
-            settings = load_settings()
-            if not settings.get('group_spam', False):
-                await asyncio.sleep(5)
-                continue
-            
-            accounts = load_accounts()
-            if not accounts:
-                await asyncio.sleep(5)
-                continue
-            
-            groups = load_groups()
-            if not groups:
-                await asyncio.sleep(5)
-                continue
-            
-            spam_msg = settings.get('spam_message', '')
-            if not spam_msg:
-                await asyncio.sleep(5)
-                continue
-            
-            spam_delay = settings.get('spam_delay', 60)
-            
-            for acc in accounts:
-                try:
-                    api_id = acc.get('api_id')
-                    api_hash = acc.get('api_hash')
-                    phone = acc.get('phone')
-                    session_file = f"sessions/{phone}.session"
-                    
-                    if not os.path.exists(session_file):
-                        continue
-                    
-                    client = TelegramClient(session_file, api_id, api_hash)
-                    await client.connect()
-                    
-                    if not await client.is_user_authorized():
-                        await client.disconnect()
-                        continue
-                    
-                    me = await client.get_me()
-                    print(f"[GroupSpam] Spamming as {me.first_name}...")
-                    
-                    for group in groups:
-                        try:
-                            entity = await client.get_entity(group)
-                            
-                            # Typing effect
-                            delay = settings.get('typing_delay', 240)
-                            if delay > 0:
-                                async with client.action(entity, 'typing'):
-                                    await asyncio.sleep(min(delay, 5))
-                            
-                            await client.send_message(entity, spam_msg)
-                            print(f"[GroupSpam] Sent to {group}: {spam_msg[:30]}...")
-                            await asyncio.sleep(spam_delay)
-                        
-                        except Exception as e:
-                            print(f"[GroupSpam] Group error {group}: {e}")
-                            continue
-                    
-                    await client.disconnect()
-                    
-                except Exception as e:
-                    print(f"[GroupSpam] Account error: {e}")
-                    continue
-            
-            await asyncio.sleep(60)
-        
+            client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
+            await client.connect()
+            me = await client.get_me()
+            if me:
+                session_str = client.session.save()
+                acc = {
+                    'id': gen_acc_id(),
+                    'name': me.first_name or 'Unknown',
+                    'phone': f"+{me.phone or 'Unknown'}",
+                    'user_id': me.id,
+                    'session': session_str,
+                    'api_id': DEFAULT_API_ID,
+                    'api_hash': DEFAULT_API_HASH,
+                    'enabled': True,
+                    'is_backup': False,
+                    'proxy': None
+                }
+                add_account_data(acc)
+                await client.disconnect()
+                context.user_data['await'] = None
+                await update.message.reply_text(f"✅ Account added: {me.first_name}!")
+                c = await start_account(acc)
+                if c:
+                    active_accounts.append(acc)
+                    account_clients[acc['id']] = c
+                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                    account_stop_flags[acc['id']] = False
+                    register_ar(c, acc)
+                    await update.message.reply_text("✅ Account started!")
+            else:
+                await update.message.reply_text("❌ Invalid session!")
         except Exception as e:
-            print(f"[GroupSpam] Worker error: {e}")
-            await asyncio.sleep(10)
+            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+        context.user_data['await'] = None
+
+    elif await_state == 'ac_bk_ss':
+        try:
+            client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
+            await client.connect()
+            me = await client.get_me()
+            if me:
+                session_str = client.session.save()
+                acc = {
+                    'id': gen_acc_id(),
+                    'name': me.first_name or 'Unknown',
+                    'phone': f"+{me.phone or 'Unknown'}",
+                    'user_id': me.id,
+                    'session': session_str,
+                    'api_id': DEFAULT_API_ID,
+                    'api_hash': DEFAULT_API_HASH,
+                    'enabled': False,
+                    'is_backup': True,
+                    'proxy': None
+                }
+                add_account_data(acc, is_backup=True)
+                await client.disconnect()
+                await update.message.reply_text(f"✅ Backup added: {me.first_name}!")
+            else:
+                await update.message.reply_text("❌ Invalid session!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
+        context.user_data['await'] = None
+
+    elif await_state == 'proxy':
+        aid = context.user_data.get('pr_aid')
+        acc = find_account(aid) if aid else None
+        if not acc:
+            await update.message.reply_text("❌ Account not found!")
+            context.user_data['await'] = None
+            return
+        if text.lower() == 'remove':
+            acc['proxy'] = None
+            d = load_accounts_data()
+            for key in ['main', 'backup']:
+                for i, a in enumerate(d[key]):
+                    if a['id'] == aid:
+                        d[key][i]['proxy'] = None
+                        break
+            save_json(ACCOUNTS_FILE, d)
+            await update.message.reply_text("✅ Proxy removed!")
+        else:
+            parts = text.split(':')
+            if len(parts) >= 3:
+                proxy = {
+                    'addr': parts[1],
+                    'port': int(parts[2]),
+                    'username': parts[3] if len(parts) > 3 else '',
+                    'password': parts[4] if len(parts) > 4 else '',
+                    'rdns': True
+                }
+                if parts[0] == 'socks5':
+                    acc['proxy'] = proxy
+                    d = load_accounts_data()
+                    for key in ['main', 'backup']:
+                        for i, a in enumerate(d[key]):
+                            if a['id'] == aid:
+                                d[key][i]['proxy'] = proxy
+                                break
+                    save_json(ACCOUNTS_FILE, d)
+                    await update.message.reply_text("✅ Proxy set! Restart account to apply.")
+                else:
+                    await update.message.reply_text("❌ Use format: socks5:ip:port:user:pass")
+            else:
+                await update.message.reply_text("❌ Invalid format! Use: socks5:ip:port:user:pass")
+        context.user_data['await'] = None
+
+    elif await_state == 'upi_id':
+        set_setting('upi_id', text)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ UPI ID set to: {text}")
+
+    elif await_state == 'paytm_num':
+        set_setting('paytm_num', text)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ Paytm set to: {text}")
+
+    elif await_state == 'price_list':
+        set_setting('price_list_text', text)
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Price list updated!")
+
+    elif await_state == 'payment_reply':
+        set_setting('payment_keyword_reply', text)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ Payment reply set to: {text}")
+
+    else:
+        await update.message.reply_text(f"❓ Unknown input state: {await_state}")
+        context.user_data['await'] = None
 
 
-# ============ MAIN SETUP ============
+# ====== PHOTO HANDLER ======
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID and user_id not in admins:
+        return
+    await_state = context.user_data.get('await')
 
-async def show_main_menu(message):
-    """Show main menu"""
-    settings = load_settings()
-    m = f"*Main Menu*\n\nAccount: {len(load_accounts())} loaded\nAuto Reply: {'ON' if settings.get('auto_reply', False) else 'OFF'}\nGroup Spam: {'ON' if settings.get('group_spam', False) else 'OFF'}"
-    kb = [
-        [InlineKeyboardButton("📂 Accounts", callback_data="m_accounts")],
-        [InlineKeyboardButton("🤖 Auto Reply", callback_data="m_auto")],
-        [InlineKeyboardButton("📢 Group Spam", callback_data="group_spam_menu")],
-        [InlineKeyboardButton("🔧 Settings", callback_data="m_set")],
-        [InlineKeyboardButton("💾 Backup", callback_data="m_backup")]
-    ]
-    await message.reply_text(m, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+    if await_state == 'welcome_image':
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        await file.download_to_drive(str(WELCOME_IMAGE_FILE))
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ Welcome image updated!")
+
+    elif await_state == 'qr_code':
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        await file.download_to_drive(str(QR_CODE_FILE))
+        context.user_data['await'] = None
+        await update.message.reply_text("✅ QR code updated!")
+
+    else:
+        await update.message.reply_text("❓ Unexpected photo. Use menu to upload.")
 
 
-# ============ FLASK SERVER ============
-
-app = Flask(__name__)
-
-@app.route('/')
+# ====== FLASK ======
+@flask_app.route('/')
 def home():
-    return "🤖 Bot is running!"
+    return jsonify({"status": "running", "accounts": len(get_all_accounts()), "active": len(active_accounts)})
 
-@app.route('/health')
+@flask_app.route('/health')
 def health():
-    return jsonify({"status": "ok", "accounts": len(load_accounts()), "auto_reply": load_settings().get('auto_reply', False)})
+    return jsonify({"ok": True})
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
 
-# ============ ENTRY POINT ============
+# ====== MAIN ======
+async def main_async():
+    global bot_ready, ptb_application
 
-async def main():
-    print("=" * 50)
-    print("🤖 TELEGRAM AUTO REPLY + SPAM BOT")
-    print("=" * 50)
-    
-    # Ensure directories
-    os.makedirs("data", exist_ok=True)
-    os.makedirs("sessions", exist_ok=True)
-    
-    # Create default settings if not exist
-    if not os.path.exists("data/settings.json"):
-        default_settings = {
-            "auto_reply": False,
-            "group_spam": False,
-            "block_photo": False,
-            "typing_delay": 240,
-            "welcome_text": "👋 Welcome!",
-            "payment_method": "upi",
-            "upi_id": "",
-            "paytm": "",
-            "price": 0,
-            "spam_message": "",
-            "spam_delay": 60
-        }
-        save_settings(default_settings)
-    
-    # Create default replies if not exist
-    if not os.path.exists("data/replies.json"):
-        save_replies({"__default__": "Hello! How can I help you?"})
-    
-    # Start bot client
-    bot = TelegramClient("bot_session", API_ID, API_HASH)
-    await bot.start(bot_token=BOT_TOKEN)
-    
-    # Register handlers
-    bot.add_event_handler(handle_text, events.NewMessage(incoming=True, func=lambda e: isinstance(e.message, types.Message) and not e.message.out))
-    bot.add_event_handler(handle_callback, events.CallbackQuery())
-    bot.add_event_handler(handle_photo, events.NewMessage(incoming=True, func=lambda e: isinstance(e.message, types.Message) and e.message.photo and not e.message.out))
-    
-    # Start workers
-    asyncio.create_task(auto_reply_worker())
-    asyncio.create_task(group_spam_worker())
-    
-    # Start Flask in a thread
-    import threading
+    logger.info("Starting bot...")
+
+    ptb = Application.builder().token(BOT_TOKEN).build()
+    ptb_application = ptb
+
+    ptb.add_handler(CommandHandler("start", start_command))
+    ptb.add_handler(CallbackQueryHandler(handle_callback))
+    ptb.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
+    ptb.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
+
+    await ptb.initialize()
+    await ptb.start()
+    await ptb.bot.delete_webview(drop_pending_updates=True)
+
+    await setup_auto_reply()
+
+    asyncio.create_task(check_account_status_periodically())
+
+    bot_ready = True
+    logger.info(f"Bot ready! Owner ID: {OWNER_ID}")
+
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await ptb.stop()
+        await ptb.shutdown()
+
+
+def main():
+    logger.info("=" * 50)
+    logger.info("TELEGRAM AUTO REPLY + SPAM BOT")
+    logger.info("=" * 50)
+
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    print("✅ Flask server running on port 8080")
-    
-    print("✅ Bot is running! Send /start to your bot to begin.")
-    print("=" * 50)
-    
-    await bot.run_until_disconnected()
+    logger.info(f"Flask running on port {PORT}")
+
+    try:
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user.")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n⏹ Bot stopped by user.")
-    except Exception as e:
-        print(f"Fatal error: {e}")
+    main()
