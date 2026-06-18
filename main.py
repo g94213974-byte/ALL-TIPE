@@ -101,7 +101,6 @@ shutdown_event = asyncio.Event()
 logout_notification_enabled = True
 
 _settings_cache = {}
-_settings_cache_dirty = False
 
 DEFAULT_SETTINGS = {
     'auto_reply_enabled': True,
@@ -150,17 +149,15 @@ def get_setting(key, default=None):
     return _settings_cache.get(key, default if default is not None else DEFAULT_SETTINGS.get(key))
 
 def set_setting(key, value):
-    global _settings_cache, _settings_cache_dirty
+    global _settings_cache
     if not _settings_cache:
         _load_settings_to_cache()
     _settings_cache[key] = value
-    _settings_cache_dirty = True
     try:
         tmp = SETTINGS_FILE.with_suffix('.tmp')
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(_settings_cache, f, indent=2, ensure_ascii=False)
         tmp.replace(SETTINGS_FILE)
-        _settings_cache_dirty = False
     except Exception as e:
         logger.error(f"Settings save failed: {e}")
 
@@ -1129,97 +1126,65 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "st_pay":
         upi = get_setting('upi_id', '')
         paytm = get_setting('paytm_num', '')
-        txt = f"💳 **Payment Settings**\n\nUPI: `{upi if upi else 'Not set'}`\nPaytm: `{paytm if paytm else 'Not set'}`"
+        txt = f"💳 **Payment Settings**\n\n📱 UPI: {upi or '❌ Not Set'}\n💳 PayTm: {paytm or '❌ Not Set'}"
         kb = [
-            [InlineKeyboardButton("✏️ Set UPI ID", callback_data="st_pay_upi")],
-            [InlineKeyboardButton("✏️ Set Paytm", callback_data="st_pay_paytm")],
-            [InlineKeyboardButton("✏️ Set Price List", callback_data="st_pay_price")],
-            [InlineKeyboardButton("✏️ Payment Reply", callback_data="st_pay_reply")],
+            [InlineKeyboardButton("✏️ Set UPI", callback_data="st_upi")],
+            [InlineKeyboardButton("✏️ Set PayTm", callback_data="st_paytm")],
             [InlineKeyboardButton("🔙 Back", callback_data="m_set")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == "st_pay_upi":
-        context.user_data['await'] = 'upi_id'
-        await query.edit_message_text(f"✏️ Enter UPI ID:\n\nCurrent: {get_setting('upi_id', 'Not set')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
+    elif data == "st_upi":
+        context.user_data['await'] = 'upi'
+        await query.edit_message_text("✏️ Enter UPI ID:\n\nEx: `user@upi`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
 
-    elif data == "st_pay_paytm":
-        context.user_data['await'] = 'paytm_num'
-        await query.edit_message_text(f"✏️ Enter PayTM Number:\n\nCurrent: {get_setting('paytm_num', 'Not set')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
-
-    elif data == "st_pay_price":
-        context.user_data['await'] = 'price_list'
-        await query.edit_message_text(f"✏️ Enter Price List Text:\n\nCurrent:\n{get_setting('price_list_text', '...')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
-
-    elif data == "st_pay_reply":
-        context.user_data['await'] = 'payment_reply'
-        await query.edit_message_text(f"✏️ Enter Payment Keyword Reply:\n\nCurrent: {get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
+    elif data == "st_paytm":
+        context.user_data['await'] = 'paytm'
+        await query.edit_message_text("✏️ Enter PayTm Number:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
 
     elif data == "st_qr":
         context.user_data['await'] = 'qr_code'
-        await query.edit_message_text("📷 **Send QR Code Image now:**\n\nJust send a photo.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
+        await query.edit_message_text("📷 Send QR Code image now:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
 
     elif data == "m_stat":
-        txt = f"📊 **Status**\n\n"
-        txt += f"Total Accounts: {len(get_all_accounts())}\n"
-        txt += f"Active: {len(active_accounts)}\n"
-        txt += f"Auto Reply: {'🟢' if auto_reply_enabled else '🔴'}\n"
-        txt += f"Group Spam: {'🟢' if group_spam_enabled else '🔴'}\n\n"
-        total_auto = sum(account_stats.get(a['id'], {}).get('auto_sent', 0) for a in active_accounts)
-        total_spam = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
-        txt += f"Auto Replies Sent: {total_auto}\n"
-        txt += f"Spam Messages Sent: {total_spam}\n"
-        txt += f"Customers: {len(customer_count)}\n"
-        kb = [[InlineKeyboardButton("🔄 Refresh", callback_data="m_stat"), InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        ar = "🟢" if auto_reply_enabled else "🔴"
+        gs = "🟢" if group_spam_enabled else "🔴"
+        ttl_auto = sum(account_stats.get(a['id'], {}).get('auto_sent', 0) for a in active_accounts)
+        ttl_spam = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
+        spm_act = sum(1 for a in active_accounts if account_stats.get(a['id'], {}).get('spam_running', False))
+        txt = f"📊 **System Status**\n\n🤖 Auto Reply: {ar}\n📨 Group Spam: {gs}\n👤 Active: {len(active_accounts)}\n📨 Spamming: {spm_act}\n💬 Auto Sent: {ttl_auto}\n📬 Spam Sent: {ttl_spam}\n👥 Customers: {len(customer_count)}"
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="m_stat"), InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
 
     elif data == "m_adm":
-        txt = f"🛡️ **Admin Panel**\n\nLogout Notification: {'🟢' if logout_notification_enabled else '🔴'}\n"
+        txt = "🛡️ **Admin Panel**\n\n"
         kb = [
-            [InlineKeyboardButton(f"{'🔔 ON' if logout_notification_enabled else '🔕 OFF'} Logout Alert", callback_data="st_ln")],
-            [InlineKeyboardButton("🗑️ Clear Banned List", callback_data="adm_clear_banned")],
-            [InlineKeyboardButton("📋 View Banned", callback_data="adm_banned")],
-            [InlineKeyboardButton("🔄 Reload All Accounts", callback_data="adm_reload")],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
+            [InlineKeyboardButton("📢 Broadcast", callback_data="ad_bc")],
+            [InlineKeyboardButton("📄 View Logs", callback_data="ad_lg")],
+            [InlineKeyboardButton("🔄 Restart Bot", callback_data="ad_rt")],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == "adm_clear_banned":
-        save_json(BANNED_FILE, [])
-        await query.edit_message_text("✅ Banned list cleared!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+    elif data == "ad_bc":
+        context.user_data['await'] = 'broadcast'
+        await query.edit_message_text("📢 Enter broadcast message to send ALL customers:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
 
-    elif data == "adm_banned":
-        banned = load_json(BANNED_FILE, [])
-        txt = "📋 **Banned Accounts**\n\n"
-        if banned:
-            for b in banned:
-                txt += f"• {b.get('name', '?')} ({b.get('phone', 'N/A')}) - {b.get('banned_at', '?')}\n"
+    elif data == "ad_lg":
+        log_path = Path(__file__).parent / "bot.log"
+        if log_path.exists():
+            with open(log_path, 'r') as f:
+                lines = f.readlines()[-20:]
+            txt = "📄 **Last 20 Log Lines**\n\n" + "".join(lines[-500:])
         else:
-            txt += "None."
-        await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+            txt = "📄 No log file found."
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
 
-    elif data == "adm_reload":
-        await query.edit_message_text("🔄 Reloading accounts...")
-        stop_spam()
-        for aid, t in account_spam_tasks.items():
-            if not t.done(): t.cancel()
-        for aid, t in account_keepalive_tasks.items():
-            if not t.done(): t.cancel()
-        for aid, c in account_clients.items():
-            try: await c.disconnect()
-            except: pass
-        active_accounts.clear()
-        account_clients.clear()
-        account_stats.clear()
-        account_spam_tasks.clear()
-        account_keepalive_tasks.clear()
-        account_spam_active.clear()
-        await setup_auto_reply()
-        kb = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]
-        await query.edit_message_text(f"✅ Reloaded! {len(active_accounts)} accounts active.", reply_markup=InlineKeyboardMarkup(kb))
+    elif data == "ad_rt":
+        await query.edit_message_text("🔄 Restarting bot... Please wait.")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     else:
-        await query.edit_message_text(f"❓ Unknown option: {data}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
+        await query.edit_message_text(f"⚠️ Unknown callback: {data}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
 
 
 # ====== TEXT MESSAGE HANDLER ======
@@ -1227,248 +1192,333 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     if user_id != OWNER_ID and user_id not in admins:
         return
+
     text = update.message.text.strip()
     await_state = context.user_data.get('await')
 
     if not await_state:
-        if text.startswith('/'):
-            if text == '/start':
-                await start_command(update, context)
-            elif text.startswith('/add_reply'):
-                parts = text.split(' ', 2)
-                if len(parts) >= 3:
-                    keyword = parts[1].lower()
-                    reply = parts[2]
-                    replies = load_json(REPLIES_FILE, [])
-                    replies.append({'keyword': keyword, 'reply': reply, 'added_at': datetime.now().isoformat()})
-                    save_json(REPLIES_FILE, replies)
-                    await update.message.reply_text(f"✅ Reply added: `{keyword}` → {reply[:30]}...")
-                else:
-                    await update.message.reply_text("❌ Usage: /add_reply keyword reply_text")
-            elif text == '/accounts':
-                all_a = get_all_accounts()
-                txt = f"📋 **All Accounts ({len(all_a)})**\n\n"
-                for i, a in enumerate(all_a, 1):
-                    n = a.get('name', '?')
-                    p = a.get('phone', 'N/A')
-                    tp = "MAIN" if not a.get('is_backup') else "BACKUP"
-                    st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
-                    txt += f"{st} {tp} {i}. {n} 📱{p}\n"
-                await update.message.reply_text(txt[:4000])
-            elif text == '/status':
-                txt = f"📊 **Status**\n\nTotal: {len(get_all_accounts())}\nActive: {len(active_accounts)}\nAuto Reply: {'🟢' if auto_reply_enabled else '🔴'}\nGroup Spam: {'🟢' if group_spam_enabled else '🔴'}"
-                await update.message.reply_text(txt)
         return
+
+    # ─── Manage await states ───
 
     if await_state == 'welcome_text':
         set_setting('welcome_message', text)
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Welcome text updated!")
+        context.user_data.pop('await', None)
+        await update.message.reply_text("✅ Welcome message updated!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
+
     elif await_state == 'typing_time':
         try:
-            val = max(0, min(300, int(text)))
-            set_setting('typing_duration', val)
-            await update.message.reply_text(f"✅ Typing time set to {val}s!")
+            val = int(text)
+            if 0 <= val <= 300:
+                set_setting('typing_duration', val)
+                context.user_data.pop('await', None)
+                await update.message.reply_text(f"✅ Typing time set to {val}s!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_typing")]]))
+            else:
+                await update.message.reply_text("❌ Range 0-300!")
         except:
-            await update.message.reply_text("❌ Invalid number!")
-        context.user_data['await'] = None
+            await update.message.reply_text("❌ Enter a number!")
+
     elif await_state == 'ignore':
         set_setting('ignored_messages', text)
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Ignored messages updated!")
-    elif await_state in ['gs_bs', 'gs_bd', 'gs_cw']:
-        try:
-            val = int(text)
-            limits = {'gs_bs': (1, 50), 'gs_bd': (0, 30), 'gs_cw': (0, 300)}
-            minv, maxv = limits[await_state]
-            val = max(minv, min(maxv, val))
-            keys = {'gs_bs': 'spam_batch_size', 'gs_bd': 'spam_batch_delay', 'gs_cw': 'spam_cycle_wait'}
-            set_setting(keys[await_state], val)
-            await update.message.reply_text(f"✅ Set to {val}!")
-        except:
-            await update.message.reply_text("❌ Invalid!")
-        context.user_data['await'] = None
+        context.user_data.pop('await', None)
+        await update.message.reply_text("✅ Ignored messages updated!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+
+    elif await_state == 'upi':
+        set_setting('upi_id', text)
+        context.user_data.pop('await', None)
+        await update.message.reply_text("✅ UPI set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
+
+    elif await_state == 'paytm':
+        set_setting('paytm_num', text)
+        context.user_data.pop('await', None)
+        await update.message.reply_text("✅ PayTm set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_pay")]]))
+
+    elif await_state == 'broadcast':
+        context.user_data.pop('await', None)
+        msg = f"📢 **BROADCAST**\n\n{text}"
+        sent = 0
+        for uid in customer_count:
+            try:
+                await context.bot.send_message(chat_id=int(uid), text=msg, parse_mode='Markdown')
+                sent += 1
+                await asyncio.sleep(0.1)
+            except:
+                pass
+        await update.message.reply_text(f"✅ Broadcast sent to {sent} customers!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+
     elif await_state == 'gs_msg_add':
         add_spam_message(text)
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Spam message added!")
+        context.user_data.pop('await', None)
+        await update.message.reply_text("✅ Spam message added!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
+
+    elif await_state == 'gs_bs':
+        try:
+            val = max(1, min(50, int(text)))
+            set_setting('spam_batch_size', val)
+            set_setting('spam_speed', 'custom')
+            context.user_data.pop('await', None)
+            await update.message.reply_text(f"✅ Batch size: {val}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
+        except:
+            await update.message.reply_text("❌ Number only!")
+
+    elif await_state == 'gs_bd':
+        try:
+            val = max(0, min(30, int(text)))
+            set_setting('spam_batch_delay', val)
+            set_setting('spam_speed', 'custom')
+            context.user_data.pop('await', None)
+            await update.message.reply_text(f"✅ Batch delay: {val}s", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
+        except:
+            await update.message.reply_text("❌ Number only!")
+
+    elif await_state == 'gs_cw':
+        try:
+            val = max(0, min(300, int(text)))
+            set_setting('spam_cycle_wait', val)
+            set_setting('spam_speed', 'custom')
+            context.user_data.pop('await', None)
+            await update.message.reply_text(f"✅ Cycle wait: {val}s", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
+        except:
+            await update.message.reply_text("❌ Number only!")
+
+    elif await_state == 'proxy':
+        aid = context.user_data.pop('pr_aid', None)
+        context.user_data.pop('await', None)
+        if text.lower() == 'remove':
+            all_accs = get_all_accounts()
+            for a in all_accs:
+                if a['id'] == aid:
+                    a['proxy'] = None
+                    save_json(ACCOUNTS_FILE, {'main': [x for x in all_accs if not x.get('is_backup')], 'backup': [x for x in all_accs if x.get('is_backup')]})
+                    break
+            await update.message.reply_text("✅ Proxy removed!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_pr")]]))
+        else:
+            parts = text.split(':')
+            if len(parts) >= 3:
+                proxy = {
+                    'addr': parts[1],
+                    'port': int(parts[2]),
+                    'username': parts[3] if len(parts) > 3 else '',
+                    'password': parts[4] if len(parts) > 4 else '',
+                    'rdns': True
+                }
+                all_accs = get_all_accounts()
+                for a in all_accs:
+                    if a['id'] == aid:
+                        a['proxy'] = proxy
+                        save_json(ACCOUNTS_FILE, {'main': [x for x in all_accs if not x.get('is_backup')], 'backup': [x for x in all_accs if x.get('is_backup')]})
+                        break
+                await update.message.reply_text("✅ Proxy set! Restart account to apply.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_pr")]]))
+            else:
+                await update.message.reply_text("❌ Format: socks5:ip:port:user:pass")
+
     elif await_state == 'ac_ph':
         context.user_data['phone'] = text
         context.user_data['await'] = 'ac_otp'
         try:
-            client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
+            ac_api_id = int(get_setting('ac_api_id', DEFAULT_API_ID))
+            ac_api_hash = get_setting('ac_api_hash', DEFAULT_API_HASH)
+            client = TelegramClient(StringSession(), ac_api_id, ac_api_hash)
             await client.connect()
-            sent = await client.send_code_request(text)
-            context.user_data['phone_code_hash'] = sent.phone_code_hash
-            context.user_data['temp_client'] = client
-            await update.message.reply_text(f"✅ OTP sent to {text}!\n\nEnter OTP:")
+            send_code = await client.send_code_request(text)
+            context.user_data['ac_client'] = client
+            context.user_data['ac_phone_code_hash'] = send_code.phone_code_hash
+            context.user_data['ac_api_id'] = ac_api_id
+            context.user_data['ac_api_hash'] = ac_api_hash
+            await update.message.reply_text(f"✅ OTP sent to {text}\n\nEnter OTP (or `00000` for test):", parse_mode='Markdown')
         except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-            context.user_data['await'] = None
+            await update.message.reply_text(f"❌ OTP send failed: {str(e)[:100]}")
+            context.user_data.pop('await', None)
+
     elif await_state == 'ac_otp':
+        otp = text.replace(' ', '')
+        client = context.user_data.get('ac_client')
         phone = context.user_data.get('phone', '')
-        client = context.user_data.get('temp_client')
-        phone_code_hash = context.user_data.get('phone_code_hash')
+        pch = context.user_data.get('ac_phone_code_hash', '')
+        api_id = context.user_data.get('ac_api_id', DEFAULT_API_ID)
+        api_hash = context.user_data.get('ac_api_hash', DEFAULT_API_HASH)
         if not client:
-            await update.message.reply_text("❌ Session expired! Start again.")
-            context.user_data['await'] = None
+            await update.message.reply_text("❌ Session expired. Start again.")
+            context.user_data.pop('await', None)
             return
         try:
-            await client.sign_in(phone, text, phone_code_hash=phone_code_hash)
+            await client.sign_in(phone=phone, code=otp, phone_code_hash=pch)
             me = await client.get_me()
             session_str = client.session.save()
+            name = me.first_name or 'Unknown'
+            user_id_val = me.id
             acc = {
-                'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
-                'phone': phone, 'user_id': me.id, 'session': session_str,
-                'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-                'enabled': True, 'is_backup': False, 'proxy': None
+                'id': gen_acc_id(),
+                'name': name,
+                'user_id': user_id_val,
+                'phone': phone,
+                'session': session_str,
+                'api_id': api_id,
+                'api_hash': api_hash,
+                'proxy': None,
+                'enabled': True,
+                'is_backup': False,
+                'added_at': datetime.now().isoformat()
             }
             add_account_data(acc)
             await client.disconnect()
-            context.user_data['await'] = None
-            await update.message.reply_text(f"✅ Account added: {me.first_name}!\n\nStarting...")
-            c = await start_account(acc)
-            if c:
-                active_accounts.append(acc)
-                account_clients[acc['id']] = c
-                account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                account_stop_flags[acc['id']] = False
-                register_ar(c, acc)
-                await update.message.reply_text("✅ Account started!")
+            context.user_data.pop('await', None)
+            context.user_data.pop('ac_client', None)
+            context.user_data.pop('phone', None)
+            await update.message.reply_text(f"✅ Account added!\n👤 {name}\n📱 {phone}\n\n🔄 Redeploy to activate.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+            try:
+                n_client = await start_account(acc)
+                if n_client:
+                    active_accounts.append(acc)
+                    account_clients[acc['id']] = n_client
+                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                    account_stop_flags[acc['id']] = False
+                    register_ar(n_client, acc)
+                    await update.message.reply_text("✅ Account activated without redeploy!")
+            except:
+                pass
         except SessionPasswordNeededError:
             context.user_data['await'] = 'ac_2fa'
             await update.message.reply_text("🔐 2FA enabled! Enter password:")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-            context.user_data['await'] = None
+        except PhoneCodeInvalidError:
+            await update.message.reply_text("❌ Invalid OTP! Try again:")
+        except PhoneCodeExpiredError:
+            await update.message.reply_text("❌ OTP expired. Start again.")
+            context.user_data.pop('await', None)
+
     elif await_state == 'ac_2fa':
-        client = context.user_data.get('temp_client')
-        if client:
+        client = context.user_data.get('ac_client')
+        phone = context.user_data.get('phone', '')
+        api_id = context.user_data.get('ac_api_id', DEFAULT_API_ID)
+        api_hash = context.user_data.get('ac_api_hash', DEFAULT_API_HASH)
+        if not client:
+            await update.message.reply_text("❌ Session expired.")
+            context.user_data.pop('await', None)
+            return
+        try:
+            await client.sign_in(password=text)
+            me = await client.get_me()
+            session_str = client.session.save()
+            name = me.first_name or 'Unknown'
+            acc = {
+                'id': gen_acc_id(),
+                'name': name,
+                'user_id': me.id,
+                'phone': phone,
+                'session': session_str,
+                'api_id': api_id,
+                'api_hash': api_hash,
+                'proxy': None,
+                'enabled': True,
+                'is_backup': False,
+                'added_at': datetime.now().isoformat()
+            }
+            add_account_data(acc)
+            await client.disconnect()
+            context.user_data.pop('await', None)
+            context.user_data.pop('ac_client', None)
+            context.user_data.pop('phone', None)
+            await update.message.reply_text(f"✅ Account added!\n👤 {name}\n📱 {phone}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
             try:
-                await client.sign_in(password=text)
-                me = await client.get_me()
-                session_str = client.session.save()
-                phone = context.user_data.get('phone', '')
-                acc = {
-                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
-                    'phone': phone, 'user_id': me.id, 'session': session_str,
-                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-                    'enabled': True, 'is_backup': False, 'proxy': None
-                }
-                add_account_data(acc)
-                await client.disconnect()
-                context.user_data['await'] = None
-                await update.message.reply_text(f"✅ Account added: {me.first_name}!")
-                c = await start_account(acc)
-                if c:
+                n_client = await start_account(acc)
+                if n_client:
                     active_accounts.append(acc)
-                    account_clients[acc['id']] = c
+                    account_clients[acc['id']] = n_client
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
-                    register_ar(c, acc)
-                    await update.message.reply_text("✅ Account started!")
-            except Exception as e:
-                await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-                context.user_data['await'] = None
-    elif await_state == 'ac_ss':
-        try:
-            client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
-            await client.connect()
-            me = await client.get_me()
-            if me:
-                session_str = client.session.save()
-                acc = {
-                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
-                    'phone': f"+{me.phone or 'Unknown'}", 'user_id': me.id, 'session': session_str,
-                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-                    'enabled': True, 'is_backup': False, 'proxy': None
-                }
-                add_account_data(acc)
-                await client.disconnect()
-                context.user_data['await'] = None
-                await update.message.reply_text(f"✅ Account added: {me.first_name}!")
-                c = await start_account(acc)
-                if c:
-                    active_accounts.append(acc)
-                    account_clients[acc['id']] = c
-                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                    account_stop_flags[acc['id']] = False
-                    register_ar(c, acc)
-                    await update.message.reply_text("✅ Account started!")
-            else:
-                await update.message.reply_text("❌ Invalid session!")
+                    register_ar(n_client, acc)
+                    await update.message.reply_text("✅ Auto-activated!")
+            except:
+                pass
         except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-        context.user_data['await'] = None
-    elif await_state == 'ac_bk_ss':
+            await update.message.reply_text(f"❌ 2FA failed: {str(e)[:100]}")
+            context.user_data.pop('await', None)
+
+    elif await_state == 'ac_ss':
+        if len(text) < 10:
+            await update.message.reply_text("❌ Invalid session string!")
+            return
         try:
-            client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
+            session_test = StringSession(text)
+            client = TelegramClient(session_test, DEFAULT_API_ID, DEFAULT_API_HASH)
             await client.connect()
             me = await client.get_me()
             if me:
-                session_str = client.session.save()
+                name = me.first_name or 'Unknown'
+                phone = me.phone or 'N/A'
                 acc = {
-                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
-                    'phone': f"+{me.phone or 'Unknown'}", 'user_id': me.id, 'session': session_str,
-                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-                    'enabled': False, 'is_backup': True, 'proxy': None
+                    'id': gen_acc_id(),
+                    'name': name,
+                    'user_id': me.id,
+                    'phone': phone,
+                    'session': text,
+                    'api_id': DEFAULT_API_ID,
+                    'api_hash': DEFAULT_API_HASH,
+                    'proxy': None,
+                    'enabled': True,
+                    'is_backup': False,
+                    'added_at': datetime.now().isoformat()
+                }
+                add_account_data(acc)
+                await client.disconnect()
+                context.user_data.pop('await', None)
+                await update.message.reply_text(f"✅ Account added!\n👤 {name}\n📱 {phone}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+                try:
+                    n_client = await start_account(acc)
+                    if n_client:
+                        active_accounts.append(acc)
+                        account_clients[acc['id']] = n_client
+                        account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                        account_stop_flags[acc['id']] = False
+                        register_ar(n_client, acc)
+                        await update.message.reply_text("✅ Auto-activated!")
+                except:
+                    pass
+            else:
+                await update.message.reply_text("❌ Could not get user info!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Invalid session: {str(e)[:100]}")
+        finally:
+            context.user_data.pop('await', None)
+
+    elif await_state == 'ac_bk_ss':
+        if len(text) < 10:
+            await update.message.reply_text("❌ Invalid session!")
+            return
+        try:
+            session_test = StringSession(text)
+            client = TelegramClient(session_test, DEFAULT_API_ID, DEFAULT_API_HASH)
+            await client.connect()
+            me = await client.get_me()
+            if me:
+                name = me.first_name or 'Unknown'
+                phone = me.phone or 'N/A'
+                acc = {
+                    'id': gen_acc_id(),
+                    'name': name,
+                    'user_id': me.id,
+                    'phone': phone,
+                    'session': text,
+                    'api_id': DEFAULT_API_ID,
+                    'api_hash': DEFAULT_API_HASH,
+                    'proxy': None,
+                    'enabled': True,
+                    'is_backup': True,
+                    'added_at': datetime.now().isoformat()
                 }
                 add_account_data(acc, is_backup=True)
                 await client.disconnect()
-                await update.message.reply_text(f"✅ Backup added: {me.first_name}!")
+                context.user_data.pop('await', None)
+                await update.message.reply_text(f"✅ Backup added!\n👤 {name}\n📱 {phone}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
             else:
                 await update.message.reply_text("❌ Invalid session!")
         except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-        context.user_data['await'] = None
-    elif await_state == 'proxy':
-        aid = context.user_data.get('pr_aid')
-        acc = find_account(aid) if aid else None
-        if not acc:
-            await update.message.reply_text("❌ Account not found!")
-            context.user_data['await'] = None
-            return
-        if text.lower() == 'remove':
-            acc['proxy'] = None
-            d = load_accounts_data()
-            for key in ['main', 'backup']:
-                for i, a in enumerate(d[key]):
-                    if a['id'] == aid: d[key][i]['proxy'] = None; break
-            save_json(ACCOUNTS_FILE, d)
-            await update.message.reply_text("✅ Proxy removed!")
-        else:
-            parts = text.split(':')
-            if len(parts) >= 3 and parts[0] == 'socks5':
-                proxy = {'addr': parts[1], 'port': int(parts[2]), 'username': parts[3] if len(parts) > 3 else '', 'password': parts[4] if len(parts) > 4 else '', 'rdns': True}
-                acc['proxy'] = proxy
-                d = load_accounts_data()
-                for key in ['main', 'backup']:
-                    for i, a in enumerate(d[key]):
-                        if a['id'] == aid: d[key][i]['proxy'] = proxy; break
-                save_json(ACCOUNTS_FILE, d)
-                await update.message.reply_text("✅ Proxy set! Restart account to apply.")
-            else:
-                await update.message.reply_text("❌ Use: socks5:ip:port:user:pass")
-        context.user_data['await'] = None
-    elif await_state == 'upi_id':
-        set_setting('upi_id', text)
-        context.user_data['await'] = None
-        await update.message.reply_text(f"✅ UPI ID set!")
-    elif await_state == 'paytm_num':
-        set_setting('paytm_num', text)
-        context.user_data['await'] = None
-        await update.message.reply_text(f"✅ Paytm set!")
-    elif await_state == 'price_list':
-        set_setting('price_list_text', text)
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Price list updated!")
-    elif await_state == 'payment_reply':
-        set_setting('payment_keyword_reply', text)
-        context.user_data['await'] = None
-        await update.message.reply_text(f"✅ Payment reply set!")
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+            context.user_data.pop('await', None)
+
     else:
-        await update.message.reply_text(f"❓ Unknown input: {await_state}")
-        context.user_data['await'] = None
+        await update.message.reply_text(f"⚠️ Unknown state: {await_state}")
+        context.user_data.pop('await', None)
 
 
 # ====== PHOTO HANDLER ======
@@ -1476,457 +1526,186 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     if user_id != OWNER_ID and user_id not in admins:
         return
+
     await_state = context.user_data.get('await')
+
     if await_state == 'welcome_image':
-        photo = update.message.photo[-1]
-        file = await photo.get_file()
-        await file.download_to_drive(str(WELCOME_IMAGE_FILE))
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Welcome image updated!")
+        try:
+            photo = await update.message.photo[-1].get_file()
+            await photo.download_to_drive(str(WELCOME_IMAGE_FILE))
+            context.user_data.pop('await', None)
+            await update.message.reply_text("✅ Welcome image updated!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_welcome")]]))
+        except Exception as e:
+            await update.message.reply_text(f"❌ Failed: {str(e)[:50]}")
+
     elif await_state == 'qr_code':
-        photo = update.message.photo[-1]
-        file = await photo.get_file()
-        await file.download_to_drive(str(QR_CODE_FILE))
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ QR code updated!")
+        try:
+            photo = await update.message.photo[-1].get_file()
+            await photo.download_to_drive(str(QR_CODE_FILE))
+            context.user_data.pop('await', None)
+            await update.message.reply_text("✅ QR Code saved!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
+        except Exception as e:
+            await update.message.reply_text(f"❌ Failed: {str(e)[:50]}")
+
     else:
-        await update.message.reply_text("❓ Unexpected photo.")
+        await update.message.reply_text("ℹ️ No action expected.")
+
+
+# ====== COMMANDS ======
+async def add_reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("⛔ Unauthorized!")
+        return
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text("Usage: /add_reply keyword reply_text\nExample: /add_reply price See our price list!")
+        return
+    keyword = args[0].lower()
+    reply = ' '.join(args[1:])
+    replies = load_json(REPLIES_FILE, [])
+    for r in replies:
+        if r['keyword'] == keyword:
+            r['reply'] = reply
+            save_json(REPLIES_FILE, replies)
+            await update.message.reply_text(f"✅ Reply updated for `{keyword}`", parse_mode='Markdown')
+            return
+    replies.append({'keyword': keyword, 'reply': reply, 'added_at': datetime.now().isoformat()})
+    save_json(REPLIES_FILE, replies)
+    await update.message.reply_text(f"✅ Reply added for `{keyword}`", parse_mode='Markdown')
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    ttl_auto = sum(account_stats.get(a['id'], {}).get('auto_sent', 0) for a in active_accounts)
+    ttl_spam = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
+    txt = f"📊 **STATUS**\n\n👤 Active: {len(active_accounts)}\n💬 Auto Sent: {ttl_auto}\n📬 Spam Sent: {ttl_spam}\n👥 Customers: {len(customer_count)}"
+    await update.message.reply_text(txt, parse_mode='Markdown')
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    txt = """**COMMANDS:**
+/start - Open control panel
+/status - Quick status
+/add_reply keyword reply - Add custom reply
+/help - This message
+
+**FEATURES:**
+• Auto Reply with custom messages
+• Group Spam with speed control
+• Welcome message + image
+• QR code payment
+• Block photo feature
+• Typing effect
+• Account mgmt via bot
+• Backup accounts auto-activate
+"""
+    await update.message.reply_text(txt, parse_mode='Markdown')
 
 
 # ====== FLASK ======
 @flask_app.route('/')
-def home():
-    return jsonify({"status": "running", "accounts": len(get_all_accounts()), "active": len(active_accounts)})
+def index():
+    return jsonify({'status': 'running', 'accounts': len(active_accounts), 'time': datetime.now().isoformat()})
 
 @flask_app.route('/health')
 def health():
-    return jsonify({"ok": True})
+    return jsonify({'status': 'ok', 'bot_ready': bot_ready})
 
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+async def run_flask():
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False))
 
 
-# ====== MAIN ======
+# ====== MAIN SETUP ======
 async def main_async():
-    global bot_ready, ptb_application
+    global ptb_application, bot_ready, bot_event_loop
 
-    logger.info("Starting bot...")
-
-    # Fix: Initialize files
-    if not SETTINGS_FILE.exists() or SETTINGS_FILE.stat().st_size == 0:
-        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(DEFAULT_SETTINGS, f, indent=2, ensure_ascii=False)
-    if not ACCOUNTS_FILE.exists() or ACCOUNTS_FILE.stat().st_size == 0:
-        with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
-            json.dump({"main": [], "backup": []}, f, indent=2)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    PAYMENT_SS_DIR.mkdir(parents=True, exist_ok=True)
-
+    bot_event_loop = asyncio.get_event_loop()
     _load_settings_to_cache()
 
-    ptb = Application.builder().token(BOT_TOKEN).build()
+    # ─── Setup PTB ───
+    ptb = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
     ptb_application = ptb
+
+    # ─── Add handlers ───
     ptb.add_handler(CommandHandler("start", start_command))
+    ptb.add_handler(CommandHandler("status", status_command))
+    ptb.add_handler(CommandHandler("help", help_command))
+    ptb.add_handler(CommandHandler("add_reply", add_reply_command))
     ptb.add_handler(CallbackQueryHandler(handle_callback))
     ptb.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     ptb.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
+
+    # ─── Start polling ───
     await ptb.initialize()
     await ptb.start()
-    await ptb.bot.delete_webhook(drop_pending_updates=True)
+    await ptb.updater.start_polling(drop_pending_updates=True)
+
+    # ─── Setup accounts ───
     await setup_auto_reply()
+
+    # ─── Start background tasks ───
     asyncio.create_task(check_account_status_periodically())
+    asyncio.create_task(run_flask())
+
     bot_ready = True
-    logger.info(f"Bot ready! Owner ID: {OWNER_ID}")
 
-    # Notify owner
+    # ─── Notify owner ───
     try:
-        if not active_accounts:
-            await ptb.bot.send_message(chat_id=OWNER_ID,
-                text="🤖 **Bot Ready!** 🔥\n\n⚠️ No accounts found.\n👉 /start → Accounts → Add account\n\nThen use START ALL!",
-                parse_mode='Markdown')
-        else:
-            await ptb.bot.send_message(chat_id=OWNER_ID,
-                text=f"🤖 **Bot Ready!** 🔥\n✅ {len(active_accounts)} active!\nUse /start for control panel.",
-                parse_mode='Markdown')
+        await ptb.bot.send_message(
+            chat_id=OWNER_ID,
+            text=f"🔥 **Bot Ready!**\n\n👤 Accounts: {len(active_accounts)}\n🤖 Auto Reply: {'ON' if auto_reply_enabled else 'OFF'}\n📨 Group Spam: {'ON' if group_spam_enabled else 'OFF'}",
+            parse_mode='Markdown'
+        )
     except Exception as e:
-        logger.error(f"Notify failed: {e}")
+        logger.error(f"Owner notify failed: {e}")
 
-    try:
-        await asyncio.Event().wait()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await ptb.stop()
-        await ptb.shutdown()
+    logger.info(f"Bot Ready! {len(active_accounts)} accounts active.")
+
+    # ─── Keep alive ───
+    await shutdown_event.wait()
+
+
+async def shutdown_bot():
+    global bot_ready
+    logger.info("Shutting down...")
+    bot_ready = False
+    shutdown_event.set()
+
+    for tid in list(account_spam_tasks.keys()):
+        try:
+            account_spam_tasks[tid].cancel()
+        except: pass
+
+    for tid in list(account_keepalive_tasks.keys()):
+        try:
+            account_keepalive_tasks[tid].cancel()
+        except: pass
+
+    for aid, cli in account_clients.items():
+        try:
+            await cli.disconnect()
+        except: pass
+
+    if ptb_application:
+        try:
+            await ptb_application.stop()
+            await ptb_application.shutdown()
+        except: pass
+
+    logger.info("Shutdown complete.")
+
 
 def main():
-    logger.info("=" * 50)
-    logger.info("TELEGRAM AUTO REPLY + SPAM BOT")
-    logger.info("=" * 50)
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info(f"Flask on port {PORT}")
     try:
         asyncio.run(main_async())
     except KeyboardInterrupt:
-        logger.info("Stopped.")
+        asyncio.run(shutdown_bot())
     except Exception as e:
-        logger.error(f"Fatal: {e}")
+        logger.error(f"Fatal error: {e}")
         sys.exit(1)
 
-if __name__ == "__main__":
-    main()
-    # ====== TEXT MESSAGE HANDLER ======
-async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID and user_id not in admins:
-        return
-    text = update.message.text.strip()
-    await_state = context.user_data.get('await')
-
-    if not await_state:
-        if text.startswith('/'):
-            if text == '/start':
-                await start_command(update, context)
-            elif text.startswith('/add_reply'):
-                parts = text.split(' ', 2)
-                if len(parts) >= 3:
-                    keyword = parts[1].lower()
-                    reply = parts[2]
-                    replies = load_json(REPLIES_FILE, [])
-                    replies.append({'keyword': keyword, 'reply': reply, 'added_at': datetime.now().isoformat()})
-                    save_json(REPLIES_FILE, replies)
-                    await update.message.reply_text(f"✅ Reply added: `{keyword}` → {reply[:30]}...")
-                else:
-                    await update.message.reply_text("❌ Usage: /add_reply keyword reply_text")
-            elif text == '/accounts':
-                all_a = get_all_accounts()
-                txt = f"📋 **All Accounts ({len(all_a)})**\n\n"
-                for i, a in enumerate(all_a, 1):
-                    n = a.get('name', '?')
-                    p = a.get('phone', 'N/A')
-                    tp = "MAIN" if not a.get('is_backup') else "BACKUP"
-                    st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
-                    txt += f"{st} {tp} {i}. {n} 📱{p}\n"
-                await update.message.reply_text(txt[:4000])
-            elif text == '/status':
-                txt = f"📊 **Status**\n\nTotal: {len(get_all_accounts())}\nActive: {len(active_accounts)}\nAuto Reply: {'🟢' if auto_reply_enabled else '🔴'}\nGroup Spam: {'🟢' if group_spam_enabled else '🔴'}"
-                await update.message.reply_text(txt)
-        return
-
-    if await_state == 'welcome_text':
-        set_setting('welcome_message', text)
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Welcome text updated!")
-    elif await_state == 'typing_time':
-        try:
-            val = max(0, min(300, int(text)))
-            set_setting('typing_duration', val)
-            await update.message.reply_text(f"✅ Typing time set to {val}s!")
-        except:
-            await update.message.reply_text("❌ Invalid number!")
-        context.user_data['await'] = None
-    elif await_state == 'ignore':
-        set_setting('ignored_messages', text)
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Ignored messages updated!")
-    elif await_state in ['gs_bs', 'gs_bd', 'gs_cw']:
-        try:
-            val = int(text)
-            limits = {'gs_bs': (1, 50), 'gs_bd': (0, 30), 'gs_cw': (0, 300)}
-            minv, maxv = limits[await_state]
-            val = max(minv, min(maxv, val))
-            keys = {'gs_bs': 'spam_batch_size', 'gs_bd': 'spam_batch_delay', 'gs_cw': 'spam_cycle_wait'}
-            set_setting(keys[await_state], val)
-            await update.message.reply_text(f"✅ Set to {val}!")
-        except:
-            await update.message.reply_text("❌ Invalid!")
-        context.user_data['await'] = None
-    elif await_state == 'gs_msg_add':
-        add_spam_message(text)
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Spam message added!")
-    elif await_state == 'ac_ph':
-        context.user_data['phone'] = text
-        context.user_data['await'] = 'ac_otp'
-        try:
-            client = TelegramClient(StringSession(), DEFAULT_API_ID, DEFAULT_API_HASH)
-            await client.connect()
-            sent = await client.send_code_request(text)
-            context.user_data['phone_code_hash'] = sent.phone_code_hash
-            context.user_data['temp_client'] = client
-            await update.message.reply_text(f"✅ OTP sent to {text}!\n\nEnter OTP:")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-            context.user_data['await'] = None
-    elif await_state == 'ac_otp':
-        phone = context.user_data.get('phone', '')
-        client = context.user_data.get('temp_client')
-        phone_code_hash = context.user_data.get('phone_code_hash')
-        if not client:
-            await update.message.reply_text("❌ Session expired! Start again.")
-            context.user_data['await'] = None
-            return
-        try:
-            await client.sign_in(phone, text, phone_code_hash=phone_code_hash)
-            me = await client.get_me()
-            session_str = client.session.save()
-            acc = {
-                'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
-                'phone': phone, 'user_id': me.id, 'session': session_str,
-                'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-                'enabled': True, 'is_backup': False, 'proxy': None
-            }
-            add_account_data(acc)
-            await client.disconnect()
-            context.user_data['await'] = None
-            await update.message.reply_text(f"✅ Account added: {me.first_name}!\n\nStarting...")
-            c = await start_account(acc)
-            if c:
-                active_accounts.append(acc)
-                account_clients[acc['id']] = c
-                account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                account_stop_flags[acc['id']] = False
-                register_ar(c, acc)
-                await update.message.reply_text("✅ Account started!")
-        except SessionPasswordNeededError:
-            context.user_data['await'] = 'ac_2fa'
-            await update.message.reply_text("🔐 2FA enabled! Enter password:")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-            context.user_data['await'] = None
-    elif await_state == 'ac_2fa':
-        client = context.user_data.get('temp_client')
-        if client:
-            try:
-                await client.sign_in(password=text)
-                me = await client.get_me()
-                session_str = client.session.save()
-                phone = context.user_data.get('phone', '')
-                acc = {
-                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
-                    'phone': phone, 'user_id': me.id, 'session': session_str,
-                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-                    'enabled': True, 'is_backup': False, 'proxy': None
-                }
-                add_account_data(acc)
-                await client.disconnect()
-                context.user_data['await'] = None
-                await update.message.reply_text(f"✅ Account added: {me.first_name}!")
-                c = await start_account(acc)
-                if c:
-                    active_accounts.append(acc)
-                    account_clients[acc['id']] = c
-                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                    account_stop_flags[acc['id']] = False
-                    register_ar(c, acc)
-                    await update.message.reply_text("✅ Account started!")
-            except Exception as e:
-                await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-                context.user_data['await'] = None
-    elif await_state == 'ac_ss':
-        try:
-            client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
-            await client.connect()
-            me = await client.get_me()
-            if me:
-                session_str = client.session.save()
-                acc = {
-                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
-                    'phone': f"+{me.phone or 'Unknown'}", 'user_id': me.id, 'session': session_str,
-                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-                    'enabled': True, 'is_backup': False, 'proxy': None
-                }
-                add_account_data(acc)
-                await client.disconnect()
-                context.user_data['await'] = None
-                await update.message.reply_text(f"✅ Account added: {me.first_name}!")
-                c = await start_account(acc)
-                if c:
-                    active_accounts.append(acc)
-                    account_clients[acc['id']] = c
-                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                    account_stop_flags[acc['id']] = False
-                    register_ar(c, acc)
-                    await update.message.reply_text("✅ Account started!")
-            else:
-                await update.message.reply_text("❌ Invalid session!")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-        context.user_data['await'] = None
-    elif await_state == 'ac_bk_ss':
-        try:
-            client = TelegramClient(StringSession(text), DEFAULT_API_ID, DEFAULT_API_HASH)
-            await client.connect()
-            me = await client.get_me()
-            if me:
-                session_str = client.session.save()
-                acc = {
-                    'id': gen_acc_id(), 'name': me.first_name or 'Unknown',
-                    'phone': f"+{me.phone or 'Unknown'}", 'user_id': me.id, 'session': session_str,
-                    'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-                    'enabled': False, 'is_backup': True, 'proxy': None
-                }
-                add_account_data(acc, is_backup=True)
-                await client.disconnect()
-                await update.message.reply_text(f"✅ Backup added: {me.first_name}!")
-            else:
-                await update.message.reply_text("❌ Invalid session!")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:50]}")
-        context.user_data['await'] = None
-    elif await_state == 'proxy':
-        aid = context.user_data.get('pr_aid')
-        acc = find_account(aid) if aid else None
-        if not acc:
-            await update.message.reply_text("❌ Account not found!")
-            context.user_data['await'] = None
-            return
-        if text.lower() == 'remove':
-            acc['proxy'] = None
-            d = load_accounts_data()
-            for key in ['main', 'backup']:
-                for i, a in enumerate(d[key]):
-                    if a['id'] == aid: d[key][i]['proxy'] = None; break
-            save_json(ACCOUNTS_FILE, d)
-            await update.message.reply_text("✅ Proxy removed!")
-        else:
-            parts = text.split(':')
-            if len(parts) >= 3 and parts[0] == 'socks5':
-                proxy = {'addr': parts[1], 'port': int(parts[2]), 'username': parts[3] if len(parts) > 3 else '', 'password': parts[4] if len(parts) > 4 else '', 'rdns': True}
-                acc['proxy'] = proxy
-                d = load_accounts_data()
-                for key in ['main', 'backup']:
-                    for i, a in enumerate(d[key]):
-                        if a['id'] == aid: d[key][i]['proxy'] = proxy; break
-                save_json(ACCOUNTS_FILE, d)
-                await update.message.reply_text("✅ Proxy set! Restart account to apply.")
-            else:
-                await update.message.reply_text("❌ Use: socks5:ip:port:user:pass")
-        context.user_data['await'] = None
-    elif await_state == 'upi_id':
-        set_setting('upi_id', text)
-        context.user_data['await'] = None
-        await update.message.reply_text(f"✅ UPI ID set!")
-    elif await_state == 'paytm_num':
-        set_setting('paytm_num', text)
-        context.user_data['await'] = None
-        await update.message.reply_text(f"✅ Paytm set!")
-    elif await_state == 'price_list':
-        set_setting('price_list_text', text)
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Price list updated!")
-    elif await_state == 'payment_reply':
-        set_setting('payment_keyword_reply', text)
-        context.user_data['await'] = None
-        await update.message.reply_text(f"✅ Payment reply set!")
-    else:
-        await update.message.reply_text(f"❓ Unknown input: {await_state}")
-        context.user_data['await'] = None
-
-
-# ====== PHOTO HANDLER ======
-async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID and user_id not in admins:
-        return
-    await_state = context.user_data.get('await')
-    if await_state == 'welcome_image':
-        photo = update.message.photo[-1]
-        file = await photo.get_file()
-        await file.download_to_drive(str(WELCOME_IMAGE_FILE))
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ Welcome image updated!")
-    elif await_state == 'qr_code':
-        photo = update.message.photo[-1]
-        file = await photo.get_file()
-        await file.download_to_drive(str(QR_CODE_FILE))
-        context.user_data['await'] = None
-        await update.message.reply_text("✅ QR code updated!")
-    else:
-        await update.message.reply_text("❓ Unexpected photo.")
-
-
-# ====== FLASK ======
-@flask_app.route('/')
-def home():
-    return jsonify({"status": "running", "accounts": len(get_all_accounts()), "active": len(active_accounts)})
-
-@flask_app.route('/health')
-def health():
-    return jsonify({"ok": True})
-
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
-
-
-# ====== MAIN ======
-async def main_async():
-    global bot_ready, ptb_application
-
-    logger.info("Starting bot...")
-
-    # Initialize files
-    if not SETTINGS_FILE.exists() or SETTINGS_FILE.stat().st_size == 0:
-        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(DEFAULT_SETTINGS, f, indent=2, ensure_ascii=False)
-    if not ACCOUNTS_FILE.exists() or ACCOUNTS_FILE.stat().st_size == 0:
-        with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
-            json.dump({"main": [], "backup": []}, f, indent=2)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    PAYMENT_SS_DIR.mkdir(parents=True, exist_ok=True)
-
-    _load_settings_to_cache()
-
-    ptb = Application.builder().token(BOT_TOKEN).build()
-    ptb_application = ptb
-    ptb.add_handler(CommandHandler("start", start_command))
-    ptb.add_handler(CallbackQueryHandler(handle_callback))
-    ptb.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-    ptb.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
-    await ptb.initialize()
-    await ptb.start()
-    await ptb.bot.delete_webhook(drop_pending_updates=True)
-    await setup_auto_reply()
-    asyncio.create_task(check_account_status_periodically())
-    bot_ready = True
-    logger.info(f"Bot ready! Owner ID: {OWNER_ID}")
-
-    # Notify owner
-    try:
-        if not active_accounts:
-            await ptb.bot.send_message(chat_id=OWNER_ID,
-                text="🤖 **Bot Ready!** 🔥\n\n⚠️ No accounts found.\n👉 /start → Accounts → Add account\n\nThen use START ALL!",
-                parse_mode='Markdown')
-        else:
-            await ptb.bot.send_message(chat_id=OWNER_ID,
-                text=f"🤖 **Bot Ready!** 🔥\n✅ {len(active_accounts)} active!\nUse /start for control panel.",
-                parse_mode='Markdown')
-    except Exception as e:
-        logger.warning(f"Notify failed: {e}")
-
-    try:
-        await asyncio.Event().wait()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await ptb.stop()
-        await ptb.shutdown()
-
-def main():
-    logger.info("=" * 50)
-    logger.info("TELEGRAM AUTO REPLY + SPAM BOT")
-    logger.info("=" * 50)
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info(f"Flask on port {PORT}")
-    try:
-        asyncio.run(main_async())
-    except KeyboardInterrupt:
-        logger.info("Stopped.")
-    except Exception as e:
-        logger.error(f"Fatal: {e}")
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()
