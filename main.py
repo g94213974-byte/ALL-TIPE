@@ -1010,7 +1010,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("➕ **Enter user ID:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
     elif data == "ad_del" and user_id == OWNER_ID:
         if len(admins) <= 1:
-            await query.edit_message_text("🗑 **Select to remove:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+            await query.edit_message_text("❌ Only owner left!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+            return
+        kb = [[InlineKeyboardButton(f"🗑 `{a}`", callback_data=f"addc_{a}")] for a in admins if a != OWNER_ID]
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_adm")])
+        await query.edit_message_text("🗑 **Select to remove:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
     elif data.startswith("addc_") and user_id == OWNER_ID:
         aid = int(data.split('_')[1])
         if aid in admins and aid != OWNER_ID:
@@ -1249,3 +1253,133 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Unknown command. Use /start")
         context.user_data['await'] = None
+        # ─── Main Setup & Run ───
+async def setup_and_run():
+    global ptb_application, bot_ready, bot_event_loop
+    logger.info("=" * 50)
+    logger.info("STARTING TELEGRAM BOT SYSTEM")
+    logger.info("=" * 50)
+    logger.info("Setting up Python-Telegram-Bot...")
+    ptb_application = Application.builder().token(BOT_TOKEN).concurrent_updates(True).read_timeout(30).write_timeout(30).connect_timeout(30).build()
+    ptb_application.add_handler(CommandHandler("start", start_command))
+    ptb_application.add_handler(CallbackQueryHandler(handle_callback))
+    ptb_application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.error(f"PTB Error: {context.error}", exc_info=True)
+    ptb_application.add_error_handler(error_handler)
+
+    # ✅ প্রথমে initialize() কল করতে হবে
+    await ptb_application.initialize()
+
+    if RENDER_URL:
+        webhook_url = f"{RENDER_URL}/webhook"
+        logger.info(f"Setting up webhook: {webhook_url}")
+        await ptb_application.bot.set_webhook(url=webhook_url)
+    else:
+        logger.info("Starting polling...")
+        await ptb_application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+    # ✅ তারপর start()
+    await ptb_application.start()
+
+    logger.info("Setting up auto-reply accounts...")
+    await setup_auto_reply()
+    logger.info(f"Active accounts: {len(active_accounts)}")
+    bot_ready = True
+    logger.info("✅ BOT IS READY!")
+
+    try:
+        await shutdown_event.wait()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await shutdown_bot()
+
+
+async def shutdown_bot():
+    global bot_ready
+    logger.info("Shutting down bot...")
+    bot_ready = False
+    stop_spam()
+    for acc_id, client in list(account_clients.items()):
+        try:
+            await client.disconnect()
+        except:
+            pass
+    account_clients.clear()
+    active_accounts.clear()
+    if ptb_application:
+        try:
+            if RENDER_URL:
+                await ptb_application.bot.delete_webhook()
+            await ptb_application.stop()
+            await ptb_application.shutdown()
+        except Exception as e:
+            logger.warning(f"PTB shutdown warning: {e}")
+    logger.info("Bot shutdown complete")
+
+
+# ─── Flask Routes ───
+@flask_app.route('/')
+def home():
+    return jsonify({
+        'status': 'running' if bot_ready else 'starting',
+        'active_accounts': len(active_accounts),
+        'auto_reply': auto_reply_enabled,
+        'group_spam': group_spam_enabled,
+        'customers_today': len(customer_count),
+        'uptime': datetime.now().isoformat()
+    })
+
+@flask_app.route('/webhook', methods=['POST'])
+def webhook():
+    if not bot_ready:
+        return jsonify({'ok': False, 'error': 'Bot not ready'}), 503
+    try:
+        update_data = request.get_json(force=True)
+        update = Update.de_json(update_data, ptb_application.bot)
+        if update:
+            asyncio.run_coroutine_threadsafe(ptb_application.process_update(update), bot_event_loop)
+        return jsonify({'ok': True})
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@flask_app.route('/health')
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'bot_ready': bot_ready,
+        'timestamp': datetime.now().isoformat()
+    })
+
+
+# ─── Main Entry Point ───
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+
+def main():
+    global bot_event_loop
+    logger.info("Starting bot system...")
+    bot_event_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(bot_event_loop)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info(f"Flask server started on port {PORT}")
+    try:
+        bot_event_loop.run_until_complete(setup_and_run())
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+    finally:
+        try:
+            bot_event_loop.run_until_complete(shutdown_bot())
+        except:
+            pass
+        bot_event_loop.close()
+        logger.info("Bot stopped")
+
+if __name__ == "__main__":
+    main()
