@@ -7,8 +7,8 @@ All problems solved:
 3. Customer unlimited messaging (no 1-5 limit)
 4. Settings toggle working perfectly
 5. Keepalive system with instant reconnect
-6. ✅ DELETE ACCOUNT NOW WORKS PERFECTLY
-7. ✅ Backup auto-activation fixed
+6. DELETE ACCOUNT NOW WORKS PERFECTLY
+7. Backup auto-activation fixed
 """
 
 import os, sys, json, asyncio, random, logging, threading, time
@@ -328,14 +328,13 @@ async def send_logout_notification(acc, reason="Unknown"):
         bot = Bot(token=BOT_TOKEN)
         await bot.send_message(
             chat_id=OWNER_ID,
-            text=f"🚨 **ACCOUNT LOGOUT DETECTED!**\n\n"
-                 f"👤 Name: `{name}`\n"
-                 f"🆔 ID: `{acc_id}`\n"
-                 f"📱 Phone: `{phone}`\n"
-                 f"⚠️ Reason: `{reason}`\n"
-                 f"⏰ Time: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n\n"
-                 f"🔄 Auto-replacing with backup...",
-            parse_mode='Markdown'
+            text=f"ACCOUNT LOGOUT DETECTED!\n\n"
+                 f"Name: {name}\n"
+                 f"ID: {acc_id}\n"
+                 f"Phone: {phone}\n"
+                 f"Reason: {reason}\n"
+                 f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                 f"Auto-replacing with backup..."
         )
     except Exception as e:
         logger.warning(f"Failed to send logout notification: {e}")
@@ -348,12 +347,11 @@ async def send_backup_activation_notification(backup):
         bot = Bot(token=BOT_TOKEN)
         await bot.send_message(
             chat_id=OWNER_ID,
-            text=f"✅ **BACKUP ACTIVATED!**\n\n"
-                 f"👤 New Active: `{backup.get('name', 'Unknown')}`\n"
-                 f"📱 Phone: `{backup.get('phone', 'N/A')}`\n"
-                 f"⏰ Time: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n\n"
-                 f"🔋 System is fully operational.",
-            parse_mode='Markdown'
+            text=f"BACKUP ACTIVATED!\n\n"
+                 f"New Active: {backup.get('name', 'Unknown')}\n"
+                 f"Phone: {backup.get('phone', 'N/A')}\n"
+                 f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                 f"System is fully operational."
         )
     except:
         pass
@@ -696,9 +694,9 @@ async def send_payment_info(client, chat_id, event):
     qr_path = get_setting('qr_code_path', '')
     payment_msg = "**💰 Payment 💰**\n\n"
     if upi:
-        payment_msg += f"📱 UPI: `{upi}`\n"
+        payment_msg += f"📱 UPI: {upi}\n"
     if paytm:
-        payment_msg += f"💳 PayTm: `{paytm}`\n"
+        payment_msg += f"💳 PayTm: {paytm}\n"
     payment_msg += f"\n{get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')}"
     if qr_path and Path(qr_path).exists():
         try:
@@ -751,7 +749,7 @@ async def handle_payment_screenshot(event, client, uid):
         sender_name = getattr(event.sender, 'first_name', 'Unknown')
         await event.respond("Payment screenshot received! Admin will contact you soon")
         try:
-            await client.send_message(OWNER_ID, f"PAYMENT RECEIVED!\nName: {sender_name}\nID: `{uid}`", parse_mode='Markdown')
+            await client.send_message(OWNER_ID, f"PAYMENT RECEIVED!\nName: {sender_name}\nID: {uid}")
             await client.send_file(OWNER_ID, str(file_path))
         except:
             pass
@@ -968,7 +966,7 @@ async def sign_in_with_code(phone, code, client, update, context):
     except SessionPasswordNeededError:
         context.user_data['ac_2fa'] = True
         context.user_data['await'] = 'ac_otp'
-        await update.message.reply_text("2FA Password required:\n\nEnter your 2FA password:", parse_mode='Markdown')
+        await update.message.reply_text("2FA Password required:\n\nEnter your 2FA password:")
         return False
     except PhoneCodeInvalidError:
         await update.message.reply_text("Invalid OTP! Try again:")
@@ -990,7 +988,7 @@ async def sign_in_with_code(phone, code, client, update, context):
             await new_client.send_code_request(phone)
             context.user_data['ac_cl'] = new_client
             context.user_data['await'] = 'ac_otp'
-            await update.message.reply_text("Session refreshed! Enter OTP again:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
+            await update.message.reply_text("Session refreshed! Enter OTP again:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
             return False
         await update.message.reply_text(f"{err_str[:100]}")
         context.user_data['await'] = None
@@ -1016,6 +1014,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Control Panel\n\nSelect an option:", reply_markup=main_keyboard())
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled, active_accounts
+    
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -1024,8 +1024,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id != OWNER_ID and user_id not in admins:
         await query.edit_message_text("Access Denied!")
         return
-    
-    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled
     
     if data == "main":
         await query.edit_message_text("Control Panel\n\nSelect an option:", reply_markup=main_keyboard())
@@ -1318,7 +1316,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Disconnect error for {aid}: {e}")
             del account_clients[aid]
         
-        global active_accounts
         active_accounts = [x for x in active_accounts if x['id'] != aid]
         
         for d in [account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active]:
