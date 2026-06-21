@@ -3,7 +3,7 @@ services:
     name: telegram-bot
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: gunicorn main:flask_app & python main.py
     envVars:
       - key: BOT_TOKEN
         sync: false
@@ -13,3 +13,5 @@ services:
         sync: false
       - key: API_HASH
         sync: false
+      - key: PORT
+        value: 10000
