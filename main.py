@@ -113,7 +113,7 @@ logout_notification_enabled = True
 customer_count = set()
 account_id_counter = 0
 
-# Auto reply event handlers registry - to avoid duplicate handlers
+# Auto reply and spam handlers registry
 auto_reply_handlers = {}
 spam_worker_tasks = {}
 
@@ -570,9 +570,9 @@ async def harden_account_one_click(acc):
     except Exception as e:
         return f"❌ Hardening failed: {str(e)[:200]}"
 
-# ====== AUTO REPLY LOGIC (FIXED) ======
+# ====== AUTO REPLY LOGIC (MESSAGE SEEN FIXED) ======
 async def setup_auto_reply_for_account(aid, client):
-    """Set up auto reply event handler for a single account."""
+    """Set up auto reply with proper message seen timing."""
     global auto_reply_enabled, auto_reply_handlers
     
     # Remove existing handler if any
@@ -595,7 +595,8 @@ async def setup_auto_reply_for_account(aid, client):
                 return
             
             # Don't reply to self, owner, or admins
-            if sender.id == (await client.get_me()).id:
+            me = await client.get_me()
+            if sender.id == me.id:
                 return
             if sender.id in [OWNER_ID] + ADMIN_IDS:
                 return
@@ -612,18 +613,34 @@ async def setup_auto_reply_for_account(aid, client):
                 if any(ig in msg_text for ig in ignored_list):
                     return
             
-            # Wait time
+            # ===== MESSAGE SEEN LOGIC =====
+            # 1️⃣ FIRST: Wait time (NO SEEN, NO TYPING)
             wait_time = int(get_setting('wait_time', 300))
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
+            actual_wait = min(wait_time, 30)  # Cap at 30 seconds max
             
-            # Typing simulation
+            if actual_wait > 0:
+                await asyncio.sleep(actual_wait)
+                # After wait time, message still NOT seen (no double tick)
+            
+            # 2️⃣ SECOND: Mark as READ (Message Seen - Double Tick appears)
+            try:
+                await client.send_read_acknowledge(event.chat_id, max_id=event.id)
+                logger.debug(f"Message marked as read for {aid}")
+            except Exception as e:
+                logger.debug(f"Read acknowledge error: {e}")
+            
+            # Small pause after seen
+            await asyncio.sleep(0.5)
+            
+            # 3️⃣ THIRD: Show Typing indicator
             if get_setting('typing_enabled', True):
                 typing_dur = int(get_setting('typing_duration', 240))
+                actual_typing = min(typing_dur, 8)  # Cap at 8 seconds
+                
                 async with client.action(event.chat_id, 'typing'):
-                    await asyncio.sleep(min(typing_dur, 10))
+                    await asyncio.sleep(actual_typing)
             
-            # Build reply message
+            # 4️⃣ FOURTH: Send reply
             replies = load_replies()
             welcome_msg = get_setting('welcome_message', '')
             welcome_msg_2 = get_setting('welcome_message_2', '')
@@ -638,7 +655,6 @@ async def setup_auto_reply_for_account(aid, client):
                         reply_text = r['reply']
                         break
             
-            # Send reply with welcome image if available
             try:
                 if WELCOME_IMAGE_FILE.exists():
                     await client.send_file(event.chat_id, str(WELCOME_IMAGE_FILE), caption=reply_text, reply_to=event.id)
@@ -663,7 +679,7 @@ async def setup_auto_reply_for_account(aid, client):
             logger.error(f"Auto reply handler error: {e}")
     
     auto_reply_handlers[aid] = auto_reply_handler
-    logger.info(f"Auto reply handler set up for account {aid}")
+    logger.info(f"Auto reply handler (seen logic) set up for account {aid}")
 
 async def setup_auto_reply_all():
     """Set up auto reply for all active accounts."""
@@ -684,7 +700,7 @@ async def remove_auto_reply_all():
                 pass
     auto_reply_handlers = {}
 
-# ====== GROUP SPAM LOGIC (FIXED) ======
+# ====== GROUP SPAM LOGIC ======
 async def spam_worker(aid, client):
     """Send spam messages to groups continuously."""
     global group_spam_enabled
@@ -775,9 +791,7 @@ async def spam_worker(aid, client):
             except Exception as e:
                 error_str = str(e)
                 if "FORBIDDEN" in error_str or "USER_BANNED" in error_str or "CHANNEL_PRIVATE" in error_str:
-                    # Account was kicked or banned from this chat
                     failed_chats.append(chat_id)
-                    logger.info(f"Removed chat {chat_id} from target list for {aid}")
                     
                     # Try to use backup channel
                     if channels.get('backup_channels'):
@@ -787,7 +801,6 @@ async def spam_worker(aid, client):
                             target_chats.append(bk['id'])
                             channels['active_channel'] = bk
                             save_channel_backup(channels)
-                            logger.info(f"Joined backup channel {bk.get('title', '?')}")
                         except:
                             pass
                     
@@ -801,14 +814,14 @@ async def spam_worker(aid, client):
                     await asyncio.sleep(wait_sec + 5)
                     
                 else:
-                    logger.error(f"Spam send error for {aid}: {error_str[:100]}")
+                    logger.error(f"Spam error for {aid}: {error_str[:100]}")
                     chat_idx += 1
                     await asyncio.sleep(10)
         
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.error(f"Spam worker loop error {aid}: {e}")
+            logger.error(f"Spam loop error {aid}: {e}")
             await asyncio.sleep(15)
     
     account_stats.setdefault(aid, {})['spam_running'] = False
@@ -824,7 +837,7 @@ async def start_spam_all():
         if aid not in spam_worker_tasks or spam_worker_tasks[aid].done():
             task = asyncio.create_task(spam_worker(aid, client))
             spam_worker_tasks[aid] = task
-            await asyncio.sleep(1)  # Stagger starts
+            await asyncio.sleep(1)
     
     logger.info(f"Started spam for {len(spam_worker_tasks)} accounts")
 
@@ -838,13 +851,11 @@ async def stop_spam_all():
         if not spam_worker_tasks[aid].done():
             spam_worker_tasks[aid].cancel()
     
-    # Also set stop flags
     for aid in account_stop_flags:
         account_stop_flags[aid] = True
     
     await asyncio.sleep(2)
     
-    # Wait for tasks to finish
     for aid in list(spam_worker_tasks.keys()):
         try:
             await spam_worker_tasks[aid]
@@ -853,6 +864,64 @@ async def stop_spam_all():
     
     spam_worker_tasks = {}
     logger.info("All spam workers stopped")
+
+# ====== AUTO DELETE TIMER - FAST SETUP FOR ALL BOT LOGIN ACCOUNTS ======
+async def setup_auto_delete_fast():
+    """Fast auto-delete timer setup for all accounts logged in via bot."""
+    global account_clients, active_accounts
+    
+    ad_data = load_auto_delete_data()
+    days = ad_data.get("days", 1)
+    
+    # Initialize chats dict if not exists
+    if "chats" not in ad_data:
+        ad_data["chats"] = {}
+    
+    total_registered = 0
+    now = datetime.now(timezone.utc).isoformat()
+    
+    for acc in active_accounts:
+        aid = acc['id']
+        if aid not in account_clients:
+            continue
+        
+        client = account_clients[aid]
+        phone = acc.get('phone', 'unknown')
+        acc_registered = 0
+        
+        try:
+            # Get dialogs (limit to 50 for speed)
+            async for dialog in client.iter_dialogs(limit=50):
+                chat_id = dialog.id
+                chat_title = dialog.name or str(dialog.id)
+                key = f"{phone}:{chat_id}"
+                
+                # Only register if not already registered
+                if key not in ad_data["chats"]:
+                    ad_data["chats"][key] = {
+                        "phone": phone,
+                        "chat_id": chat_id,
+                        "chat_title": chat_title,
+                        "registered_at": now,
+                        "last_message_at": now
+                    }
+                    acc_registered += 1
+                
+                # Small delay
+                await asyncio.sleep(0.05)
+            
+            total_registered += acc_registered
+            logger.info(f"Auto-delete: {acc_registered} chats for {acc.get('name','?')}")
+            
+        except Exception as e:
+            logger.error(f"Auto-delete fast setup for {aid}: {e}")
+    
+    # Enable auto-delete
+    ad_data["enabled"] = True
+    ad_data["days"] = days
+    save_auto_delete_data(ad_data)
+    
+    return total_registered
 
 # ====== BACKGROUND TASKS ======
 async def keepalive_loop():
@@ -991,6 +1060,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📅 ডে সেট করো", callback_data="auto_delete_days_menu")],
             [InlineKeyboardButton("📋 ট্র্যাক করা চ্যাট", callback_data="auto_delete_list")],
             [InlineKeyboardButton("➕ চ্যাট যোগ করো", callback_data="auto_delete_add_ask")],
+            [InlineKeyboardButton("⚡ বট লগিন সব অ্যাকাউন্ট সেটাপ", callback_data="auto_delete_setup_all")],
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
@@ -1002,8 +1072,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = "চালু ✅" if ad_data["enabled"] else "বন্ধ ❌"
         await query.edit_message_text(f"⏰ অটো-ডিলিট টাইমার এখন {status}!", parse_mode='Markdown')
         await asyncio.sleep(1)
-        # Go back to menu
-        data = "auto_delete_menu"
         await button_handler(update, context)
         
     elif data == "auto_delete_days_menu":
@@ -1027,8 +1095,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_auto_delete_data(ad_data)
         await query.edit_message_text(f"✅ {days} দিন সেট করা হয়েছে!", parse_mode='Markdown')
         await asyncio.sleep(1)
-        data = "auto_delete_menu"
         await button_handler(update, context)
+        
+    elif data == "auto_delete_setup_all":
+        await query.edit_message_text("⏳ **বট লগিন থাকা সব অ্যাকাউন্টে অটো-ডিলিট সেটাপ হচ্ছে...**\n\nদ্রুত সেটাপ চলছে...", parse_mode='Markdown')
+        
+        registered = await setup_auto_delete_fast()
+        
+        await query.edit_message_text(
+            f"✅ **অটো-ডিলিট টাইমার সেটাপ সম্পন্ন!**\n\n"
+            f"📝 {registered} টি চ্যাট রেজিস্টার হয়েছে\n"
+            f"📅 {days} দিন পর মেসেজ ডিলিট হবে\n"
+            f"🔹 বটে লগিন থাকা সব {len(active_accounts)} টি অ্যাকাউন্ট সেটাপ হয়েছে",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="auto_delete_menu")]])
+        )
         
     elif data == "auto_delete_list":
         ad_data = load_auto_delete_data()
@@ -1058,7 +1139,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ====== ACCOUNT HARDENING ======
     elif data == "m_harden":
-        wait_24h = get_setting('harden_24h_wait', False)
         txt = "🔐 **Account Hardening** 🔐\n\n"
         txt += "═══════════════════════\n"
         txt += "✅ নাম, বায়ো চেঞ্জ\n"
@@ -1405,12 +1485,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ar_start":
         auto_reply_enabled = True
-        await setup_auto_reply_all()  # ← FIXED
+        await setup_auto_reply_all()
         await query.edit_message_text("✅ **অটো রিপ্লাই চালু!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
     elif data == "ar_stop":
         auto_reply_enabled = False
-        await remove_auto_reply_all()  # ← FIXED
+        await remove_auto_reply_all()
         await query.edit_message_text("⏹️ **অটো রিপ্লাই বন্ধ!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
     elif data == "ar_welcome":
@@ -1556,12 +1636,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "gs_start":
         group_spam_enabled = True
-        await start_spam_all()  # ← FIXED
+        await start_spam_all()
         await query.edit_message_text("✅ স্প্যাম চালু!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
     elif data == "gs_stop":
         group_spam_enabled = False
-        await stop_spam_all()  # ← FIXED
+        await stop_spam_all()
         await query.edit_message_text("⏹️ স্প্যাম বন্ধ!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
     elif data == "gs_spd":
@@ -1891,7 +1971,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             ac_api_id = int(os.environ.get('API_ID', str(DEFAULT_API_ID)))
             ac_api_hash = os.environ.get('API_HASH', DEFAULT_API_HASH)
             if not ac_api_id or not ac_api_hash:
-                await update.message.reply_text("❌ API_ID বা API_HASH সেট করা নেই!\n\nRender Dashboard → Environment Variable এ সেট করো:\nAPI_ID = তোমার ID\nAPI_HASH = তোমার Hash")
+                await update.message.reply_text("❌ API_ID বা API_HASH সেট করা নেই!\n\nDashboard → Environment Variable এ সেট করো:\nAPI_ID = তোমার ID\nAPI_HASH = তোমার Hash")
                 context.user_data.pop('await', None)
                 return
             client = TelegramClient(StringSession(), ac_api_id, ac_api_hash)
@@ -1944,7 +2024,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_clients[acc['id']] = n_client
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
-                    # Setup auto reply if enabled
                     if auto_reply_enabled:
                         await setup_auto_reply_for_account(acc['id'], n_client)
             except:
@@ -2137,7 +2216,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== MAIN FUNCTION ======
 async def main():
-    """Main entry point - no Updater error, no run_polling crash."""
+    """Main entry point."""
     logger.info("Starting HackerAI Pentest Bot...")
     
     if not BOT_TOKEN:
@@ -2178,19 +2257,27 @@ async def main():
             except Exception as e:
                 logger.error(f"Failed to load account {acc.get('name')}: {e}")
     
-    # Auto setup auto-reply handlers for all loaded accounts if enabled
+    # Auto setup auto-reply handlers if enabled
     if auto_reply_enabled:
         await setup_auto_reply_all()
+    
+    # ===== FAST AUTO-DELETE TIMER SETUP FOR ALL ACCOUNTS =====
+    try:
+        logger.info("Setting up auto-delete timer for all accounts...")
+        registered = await setup_auto_delete_fast()
+        logger.info(f"Auto-delete timer fast setup: {registered} chats registered")
+    except Exception as e:
+        logger.error(f"Auto-delete timer fast setup failed: {e}")
     
     # Start background tasks
     asyncio.create_task(auto_delete_messages_loop(app))
     asyncio.create_task(keepalive_loop())
     asyncio.create_task(account_health_loop())
     
-    # Start polling - this is the FIX for the Updater error
+    # Start polling
     await app.updater.start_polling(drop_pending_updates=True)
     
-    logger.info(f"Bot started! {len(active_accounts)} accounts loaded.")
+    logger.info(f"Bot started! {len(active_accounts)} accounts loaded. Auto-delete timer active.")
     
     # Keep running
     try:
@@ -2205,7 +2292,6 @@ async def main():
         await app.updater.stop()
         await app.stop()
         await app.shutdown()
-        # Disconnect all accounts
         for aid, client in list(account_clients.items()):
             try:
                 await client.disconnect()
