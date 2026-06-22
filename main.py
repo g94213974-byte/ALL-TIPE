@@ -1,1606 +1,1013 @@
-#!/usr/bin/env python3
-"""
-UNIFIED TELEGRAM BOT - ENHANCED V2
-====================================
-★ NEW: Channel Backup System
-  - Backup channels store করে রাখে
-  - Main channel থেকে kick/restrict হলে auto backup channel join
-  - Backup channel এ auto spam শুরু
-★ Restricted Account Auto Logout (2 sec)
-★ 1 Click Account Hardening
-★ Auto Delete Chat Messages (1 Day Timer)
-"""
-
-import os, sys, json, asyncio, random, logging, threading, time
-from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Any, Tuple, Set
-from collections import defaultdict
+import os, sys, json, asyncio, logging, time, hashlib, hmac, base64, re, secrets, threading, uuid, socket, ssl, random, string, urllib.parse, subprocess, shutil, requests, html, math, ipaddress, traceback
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict, deque
+from typing import Optional, Dict, List, Tuple, Any, Callable, Union
+from functools import partial, wraps
 from pathlib import Path
-import re
+from io import BytesIO
+from urllib.parse import urlparse, urljoin, quote, unquote
+from contextlib import contextmanager
 
+# ====== LOGGING ======
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler('bot.log', encoding='utf-8'), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
-# ─── ENV VARS ───
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
-DEFAULT_API_ID = int(os.environ.get("API_ID", "0"))
-DEFAULT_API_HASH = os.environ.get("API_HASH", "")
-RENDER_URL = os.environ.get('RENDER_EXTERNAL_URL', '')
-PORT = int(os.environ.get("PORT", 10000))
+# ====== TELEGRAM IMPORTS ======
+try:
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ChatMember, Chat, Message, User, InputFile, constants
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackContext
+    from telegram.error import TelegramError, Forbidden, BadRequest, RetryAfter, TimedOut, NetworkError
+    import telegram
+    logger.info(f"PTB version: {telegram.__version__ if hasattr(telegram, '__version__') else 'unknown'}")
+    PTB_AVAILABLE = True
+except ImportError as e:
+    logger.error(f"PTB import error: {e}")
+    PTB_AVAILABLE = False
 
-if not BOT_TOKEN:
-    logger.error("BOT_TOKEN not set!")
-    sys.exit(1)
-if not OWNER_ID:
-    logger.error("OWNER_ID not set!")
-    sys.exit(1)
-if not DEFAULT_API_ID or not DEFAULT_API_HASH:
-    logger.error("API_ID or API_HASH not set!")
-    sys.exit(1)
+try:
+    from telethon import TelegramClient, events, functions, types, errors
+    from telethon.tl.types import *
+    from telethon.tl.functions.messages import *
+    from telethon.tl.functions.channels import *
+    from telethon.tl.functions.account import *
+    from telethon.tl.functions.contacts import *
+    from telethon.tl.functions.users import *
+    from telethon.errors import FloodWaitError, SessionPasswordNeededError, PhoneCodeInvalidError, PhoneCodeExpiredError, PhoneNumberBannedError, PhoneNumberOccupiedError, RPCError, AuthKeyUnregisteredError, UserDeactivatedError, UserDeactivatedBanError
+    import telethon
+    logger.info(f"Telethon version: {telethon.__version__ if hasattr(telethon, '__version__') else 'unknown'}")
+    TELETHON_AVAILABLE = True
+except ImportError as e:
+    logger.error(f"Telethon import error: {e}")
+    TELETHON_AVAILABLE = False
 
-import socks
-from telethon import TelegramClient, events, functions
-from telethon.sessions import StringSession
-from telethon.errors import (
-    FloodWaitError, SessionPasswordNeededError,
-    PhoneCodeInvalidError, PhoneCodeExpiredError,
-    AuthKeyUnregisteredError, UserDeactivatedError,
-    PhoneNumberInvalidError, ChannelPrivateError,
-    ChatAdminRequiredError, UserNotParticipantError
-)
-from telethon.tl.functions.messages import (
-    GetDialogsRequest, ReadHistoryRequest, DeleteHistoryRequest, DeleteMessagesRequest
-)
-from telethon.tl.functions.contacts import BlockRequest, DeleteContactsRequest
-from telethon.tl.functions.account import UpdateStatusRequest
-from telethon.tl.functions.channels import (
-    LeaveChannelRequest, JoinChannelRequest,
-    GetParticipantRequest, GetFullChannelRequest
-)
-from telethon.tl.types import (
-    InputPeerEmpty, InputPeerChannel, InputPeerChat,
-    Channel, Chat, ChannelParticipantsSearch
-)
+try:
+    from telethon.sessions import StringSession
+    STRING_SESSION_AVAILABLE = True
+except ImportError:
+    STRING_SESSION_AVAILABLE = False
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes
-)
-from telegram.constants import ParseMode
+try:
+    from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session as flask_session
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
 
-from flask import Flask, jsonify
+# ====== ENVIRONMENT CONFIG ======
+WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', 'default_secret_change_me')
+API_HASH = os.environ.get('API_HASH', '')
+API_ID = int(os.environ.get('API_ID', '0'))
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
+CRYPTO_KEY = hashlib.sha256(os.environ.get('CRYPTO_KEY', 'default_crypto_key').encode()).digest()
 
-BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
-PAYMENT_SS_DIR = BASE_DIR / "payment_screenshots"
-HARDENING_DIR = BASE_DIR / "hardening_data"
-for d in [DATA_DIR, PAYMENT_SS_DIR, HARDENING_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+ADMIN_IDS = list(map(int, filter(None, os.environ.get('ADMIN_IDS', '').split(','))))
+OWNER_ID = int(os.environ.get('OWNER_ID', ADMIN_IDS[0] if ADMIN_IDS else '0'))
 
-ACCOUNTS_FILE = DATA_DIR / "accounts.json"
-SETTINGS_FILE = DATA_DIR / "settings.json"
-REPLIES_FILE = DATA_DIR / "replies.json"
-BANNED_FILE = DATA_DIR / "banned_accounts.json"
-SPAM_MSG_FILE = DATA_DIR / "spam_messages.json"
-WELCOME_IMAGE_FILE = DATA_DIR / "welcome_image.jpg"
-QR_CODE_FILE = DATA_DIR / "qr_code.jpg"
-AUTOJOIN_FILE = DATA_DIR / "autojoin_links.json"
-HARDENING_TASKS_FILE = DATA_DIR / "harden_tasks.json"
-TWOPA_FILE = DATA_DIR / "twofa_passwords.json"
-# ★ NEW: Channel Backup File
-CHANNEL_BACKUP_FILE = DATA_DIR / "channel_backup.json"
-# ★ NEW: Auto Delete Timer File
-AUTO_DELETE_FILE = DATA_DIR / "auto_delete_timers.json"
+USE_PROXY = os.environ.get('USE_PROXY', 'false').lower() == 'true'
+PROXY_CONFIG = None
+if USE_PROXY:
+    PROXY_CONFIG = {
+        'proxy_type': os.environ.get('PROXY_TYPE', 'socks5'),
+        'addr': os.environ.get('PROXY_ADDR', '127.0.0.1'),
+        'port': int(os.environ.get('PROXY_PORT', '9050')),
+        'username': os.environ.get('PROXY_USER', '') or None,
+        'password': os.environ.get('PROXY_PASS', '') or None
+    }
 
-flask_app = Flask(__name__)
-ptb_application = None
-bot_event_loop = None
+DEFAULT_API_ID = 2040
+DEFAULT_API_HASH = 'b18441a1ff7492a7e5c1c1a6b6a7c8d9'
 
+# ====== DATA DIRECTORY ======
+USER_DATA_DIR = Path('user_data')
+USER_DATA_DIR.mkdir(exist_ok=True)
+
+ACCOUNTS_FILE = USER_DATA_DIR / 'accounts.json'
+TASKS_FILE = USER_DATA_DIR / 'tasks.json'
+CONFIG_FILE = USER_DATA_DIR / 'config.json'
+SETTINGS_FILE = USER_DATA_DIR / 'settings.json'
+AUTO_DELETE_FILE = USER_DATA_DIR / 'auto_delete.json'
+SPAM_MESSAGES_FILE = USER_DATA_DIR / 'spam_messages.json'
+REPLIES_FILE = USER_DATA_DIR / 'replies.json'
+CUSTOMERS_FILE = USER_DATA_DIR / 'customers.json'
+CHANNEL_BACKUP_FILE = USER_DATA_DIR / 'channel_backup.json'
+AUTOJOIN_LINKS_FILE = USER_DATA_DIR / 'autojoin_links.json'
+HARDEN_TASKS_FILE = USER_DATA_DIR / 'harden_tasks.json'
+QR_CODE_FILE = USER_DATA_DIR / 'qr_code.png'
+WELCOME_IMAGE_FILE = USER_DATA_DIR / 'welcome_image.png'
+
+# ====== GLOBAL STATE ======
+accounts_lock = asyncio.Lock()
 active_accounts = []
 account_clients = {}
-account_stats = defaultdict(lambda: {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False})
+account_stats = {}
 account_stop_flags = {}
 account_spam_tasks = {}
-account_spam_active = {}
-account_spam_messages = {}
 account_keepalive_tasks = {}
-customer_count = {}
-customer_payment_photos = {}
-processing_users = set()
-admins = [OWNER_ID]
-
-auto_reply_enabled = True
-group_spam_enabled = True
-bot_ready = False
-shutdown_event = asyncio.Event()
+account_spam_active = {}
+auto_reply_enabled = False
+group_spam_enabled = False
 logout_notification_enabled = True
+customer_count = set()
+account_id_counter = 0
 
-_settings_cache = {}
-
-DEFAULT_SETTINGS = {
-    'auto_reply_enabled': True,
-    'group_spam_enabled': True,
-    'welcome_enabled': True,
-    'welcome_message': '🔥 Welcome baby! 🔥\n\nSend "price" for rates\nSend "pay" for payment',
-    'welcome_message_2': '🔥 I am available now! 😘\n\nTell me what you need?',
-    'block_photo_enabled': True,
-    'typing_enabled': True,
-    'typing_duration': 240,
-    'seen_delay': 1,
-    'wait_time': 300,
-    'spam_speed': 'medium',
-    'spam_batch_size': 5,
-    'spam_batch_delay': 3,
-    'spam_cycle_wait': 30,
-    'flood_slow_mode': True,
-    'spam_message': '𝟭𝟬 𝗠𝗜𝗡 𝗩𝗖 ₹𝟰𝟱 𝗕𝗔𝗕𝗬😘',
-    'ignored_messages': '',
-    'price_list_text': '🔥 10 MIN VC → ₹99\n🔥 20 MIN VC → ₹119\n🔥 30 MIN VC → ₹149',
-    'upi_id': '',
-    'paytm_num': '',
-    'qr_code_path': '',
-    'payment_keyword_reply': 'Scan & Pay baby 😘🔥',
-    'media_keyword_reply': 'Pay and come baby 😘🔥',
-    'offline_keyword_reply': 'Online only baby 😊',
-    'greeting_replies': ['i am ready baby pay and come🔥', 'Hey baby! 😘', 'Hello! kitna min cheye? 🔥'],
-    'default_replies': ['Ready baby! Pay karo and come vc! 🔥', 'Main ready hoon! 😘', 'pay and come baby🥰'],
-    'new_account_name': '',
-    'new_account_bio': '',
-    'auto_clear_chat_days': 1,
-    'auto_join_enabled': True,
-    'harden_remove_devices': True,
-    'harden_set_2fa': True,
-    # ★ NEW: Channel Backup Settings
-    'channel_backup_enabled': True,
-    'channel_spam_enabled': True,
-    'channel_check_interval': 30,
-    # ★ NEW: Auto Delete Settings
-    'auto_delete_timer_enabled': True,
-    'auto_delete_timer_days': 1,  # ১ দিন পর অটো ডিলিট
-}
-
-def _load_settings():
-    global _settings_cache
+# ====== JSON HELPERS ======
+def load_json(path, default=None):
     try:
-        if SETTINGS_FILE.exists() and SETTINGS_FILE.stat().st_size > 0:
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                _settings_cache = json.load(f)
-        else:
-            _settings_cache = {}
-    except:
-        _settings_cache = {}
-    for k, v in DEFAULT_SETTINGS.items():
-        if k not in _settings_cache:
-            _settings_cache[k] = v
-
-def get_setting(key, default=None):
-    if not _settings_cache:
-        _load_settings()
-    return _settings_cache.get(key, default if default is not None else DEFAULT_SETTINGS.get(key))
-
-def set_setting(key, value):
-    global _settings_cache
-    if not _settings_cache:
-        _load_settings()
-    _settings_cache[key] = value
-    try:
-        tmp = SETTINGS_FILE.with_suffix('.tmp')
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(_settings_cache, f, indent=2, ensure_ascii=False)
-        tmp.replace(SETTINGS_FILE)
-    except Exception as e:
-        logger.error(f"Settings save failed: {e}")
-
-def load_json(fp, default=None):
-    try:
-        fp = Path(fp)
-        if fp.exists() and fp.stat().st_size > 0:
-            with open(fp, 'r', encoding='utf-8') as f:
+        if path and path.exists():
+            with open(path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Load failed {path}: {e}")
     return default if default is not None else {}
 
-def save_json(fp, data):
+def save_json(path, data):
     try:
-        fp = Path(fp)
-        tmp = fp.with_suffix('.tmp')
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        tmp.replace(fp)
-        return True
-    except:
-        return False
+        if path:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+            return True
+    except Exception as e:
+        logger.error(f"Save failed {path}: {e}")
+    return False
 
-# ========== ACCOUNT DATA ==========
-def load_accounts_data():
-    return load_json(ACCOUNTS_FILE, {'main': [], 'backup': []})
+# ====== ACCOUNT DATA FUNCTIONS ======
+async def get_accounts():
+    async with accounts_lock:
+        return load_json(ACCOUNTS_FILE, {})
+
+async def save_accounts(data):
+    async with accounts_lock:
+        return save_json(ACCOUNTS_FILE, data)
 
 def get_all_accounts():
-    d = load_accounts_data()
-    return d.get('main', []) + d.get('backup', [])
+    data = load_json(ACCOUNTS_FILE, {})
+    return list(data.values())
 
 def get_main_accounts():
-    return load_accounts_data().get('main', [])
+    data = load_json(ACCOUNTS_FILE, {})
+    return [a for a in data.values() if not a.get('is_backup')]
 
 def get_backup_accounts():
-    return load_accounts_data().get('backup', [])
-
-def add_account_data(acc, is_backup=False):
-    d = load_accounts_data()
-    key = 'backup' if is_backup else 'main'
-    for existing in d[key]:
-        if existing.get('user_id') == acc.get('user_id') or existing.get('session') == acc.get('session'):
-            return False
-    d[key].append(acc)
-    save_json(ACCOUNTS_FILE, d)
-    return True
-
-def remove_account_data(aid):
-    d = load_accounts_data()
-    found = False
-    for key in ['main', 'backup']:
-        original_len = len(d[key])
-        d[key] = [a for a in d[key] if a.get('id') != aid]
-        if len(d[key]) < original_len:
-            found = True
-    if found:
-        save_json(ACCOUNTS_FILE, d)
-        return True
-    return False
+    data = load_json(ACCOUNTS_FILE, {})
+    return [a for a in data.values() if a.get('is_backup')]
 
 def find_account(aid):
-    for a in get_all_accounts():
-        if a['id'] == aid:
-            return a
+    data = load_json(ACCOUNTS_FILE, {})
+    for k, v in data.items():
+        if v['id'] == aid:
+            return v
     return None
 
-def gen_acc_id():
-    return f"acc_{int(time.time())}_{random.randint(100, 999)}"
+def add_account_data(acc):
+    data = load_json(ACCOUNTS_FILE, {})
+    data[acc['id']] = acc
+    return save_json(ACCOUNTS_FILE, data)
 
+def remove_account_data(aid):
+    data = load_json(ACCOUNTS_FILE, {})
+    if aid in data:
+        del data[aid]
+        return save_json(ACCOUNTS_FILE, data)
+    return False
+
+def gen_acc_id():
+    global account_id_counter
+    account_id_counter += 1
+    return f"ACC_{int(time.time())}_{account_id_counter}"
+
+# ====== SETTINGS ======
+def get_setting(key, default=None):
+    data = load_json(SETTINGS_FILE, {})
+    return data.get(key, default)
+
+def set_setting(key, value):
+    data = load_json(SETTINGS_FILE, {})
+    data[key] = value
+    return save_json(SETTINGS_FILE, data)
+
+# ====== SPAM MESSAGES ======
 def load_spam_messages():
-    return load_json(SPAM_MSG_FILE, [])
+    return load_json(SPAM_MESSAGES_FILE, [])
 
 def save_spam_messages(msgs):
-    save_json(SPAM_MSG_FILE, msgs)
+    return save_json(SPAM_MESSAGES_FILE, msgs)
 
-def add_spam_message(msg):
+def add_spam_message(text):
     msgs = load_spam_messages()
-    msgs.append({'id': int(time.time()), 'text': msg, 'added_at': datetime.now().isoformat()})
-    save_spam_messages(msgs)
-    return True
+    msgs.append({"text": text, "added_at": datetime.now().isoformat()})
+    return save_spam_messages(msgs)
 
-def delete_spam_message(msg_id):
-    msgs = load_spam_messages()
-    msgs = [m for m in msgs if m['id'] != msg_id]
-    save_spam_messages(msgs)
-    return True
+# ====== CUSTOMER TRACKING ======
+def load_customers():
+    return load_json(CUSTOMERS_FILE, set())
 
-# ========== ★★ NEW: AUTO DELETE TIMER SYSTEM (1 DAY) ★★ ==========
-def load_auto_delete_timers():
-    """অটো ডিলিট টাইমার ডাটা লোড করে"""
-    return load_json(AUTO_DELETE_FILE, {
-        'active_timers': {},      # acc_id → timer info
-        'deleted_messages': 0,    # মোট ডিলিট করা মেসেজ
-        'last_cleanup': None      # শেষ ক্লিনআপের সময়
-    })
+def save_customers(customers):
+    return save_json(CUSTOMERS_FILE, list(customers))
 
-def save_auto_delete_timers(data):
-    save_json(AUTO_DELETE_FILE, data)
+def add_customer(uid):
+    global customer_count
+    customer_count.add(str(uid))
+    save_customers(customer_count)
 
-def register_chat_for_auto_delete(acc_id, chat_id, chat_title=""):
-    """একটি চ্যাটকে অটো ডিলিট টাইমারে রেজিস্টার করে"""
-    data = load_auto_delete_timers()
-    
-    if acc_id not in data['active_timers']:
-        data['active_timers'][acc_id] = {}
-    
-    # যদি চ্যাট ইতিমধ্যে রেজিস্টার করা থাকে, আপডেট না করে
-    if str(chat_id) not in data['active_timers'][acc_id]:
-        data['active_timers'][acc_id][str(chat_id)] = {
-            'chat_title': chat_title[:50],
-            'registered_at': datetime.now().isoformat(),
-            'delete_after_days': get_setting('auto_delete_timer_days', 1),
-            'messages_count': 0
-        }
-        save_auto_delete_timers(data)
-        return True
-    return False
-
-async def auto_delete_messages_loop():
-    """প্রতি ঘন্টায় চেক করে - ১ দিন পর পুরনো মেসেজ ডিলিট করে"""
-    logger.info("🧹★ Auto Delete Timer started - checking every hour!")
-    
-    while not shutdown_event.is_set():
-        try:
-            if not get_setting('auto_delete_timer_enabled', True):
-                await asyncio.sleep(3600)
-                continue
-            
-            data = load_auto_delete_timers()
-            delete_days = get_setting('auto_delete_timer_days', 1)
-            now = datetime.now()
-            total_deleted = 0
-            
-            for acc_id, chats in list(data['active_timers'].items()):
-                if acc_id not in account_clients:
-                    continue
-                
-                client = account_clients[acc_id]
-                if not client:
-                    continue
-                
-                for chat_id_str, chat_info in list(chats.items()):
-                    try:
-                        registered_time = datetime.fromisoformat(chat_info['registered_at'])
-                        time_diff = now - registered_time
-                        
-                        # ১ দিন পার হয়েছে কিনা চেক
-                        if time_diff.total_seconds() >= (delete_days * 86400):
-                            try:
-                                chat_id = int(chat_id_str)
-                                entity = await client.get_entity(chat_id)
-                                
-                                # সব মেসেজ ডিলিট
-                                deleted_count = 0
-                                async for msg in client.iter_messages(entity, limit=500):
-                                    try:
-                                        await client.delete_messages(entity, [msg.id], revoke=True)
-                                        deleted_count += 1
-                                    except:
-                                        pass
-                                    await asyncio.sleep(0.1)
-                                
-                                if deleted_count > 0:
-                                    total_deleted += deleted_count
-                                    logger.info(f"🧹 Deleted {deleted_count} messages from {chat_info.get('chat_title','?')} (acc: {acc_id})")
-                                
-                                # চ্যাট ডিলিট করার পর টাইমার থেকে রিমুভ
-                                del data['active_timers'][acc_id][chat_id_str]
-                                
-                            except Exception as e:
-                                logger.warning(f"Delete failed for {chat_id_str}: {e}")
-                                # এরর হলে টাইমার থেকে রিমুভ না করে রাখি
-                    
-                    except Exception as e:
-                        logger.warning(f"Timer parse error: {e}")
-                
-                await asyncio.sleep(1)
-            
-            if total_deleted > 0:
-                data['deleted_messages'] += total_deleted
-                data['last_cleanup'] = datetime.now().isoformat()
-                save_auto_delete_timers(data)
-                logger.info(f"🧹 Total {total_deleted} messages auto-deleted!")
-            
-            await asyncio.sleep(3600)  # প্রতি ঘন্টায় চেক
-            
-        except Exception as e:
-            logger.error(f"Auto delete timer error: {e}")
-            await asyncio.sleep(3600)
-
-# ========== ★★ NEW: CHANNEL BACKUP SYSTEM ★★ ==========
+# ====== CHANNEL BACKUP ======
 def load_channel_backup():
-    """চ্যানেল ব্যাকআপ ডাটা লোড করে"""
-    return load_json(CHANNEL_BACKUP_FILE, {
-        'main_channels': [],    # মূল চ্যানেল
-        'backup_channels': [],  # ব্যাকআপ চ্যানেল
-        'active_channel': None  # বর্তমানে কোন চ্যানেল active
-    })
+    return load_json(CHANNEL_BACKUP_FILE, {"main_channels": [], "backup_channels": [], "active_channel": None})
 
 def save_channel_backup(data):
-    """চ্যানেল ব্যাকআপ ডাটা সেভ করে"""
-    save_json(CHANNEL_BACKUP_FILE, data)
+    return save_json(CHANNEL_BACKUP_FILE, data)
 
-def add_main_channel(channel_info):
-    """মূল চ্যানেল যোগ করো"""
-    data = load_channel_backup()
-    for ch in data['main_channels']:
-        if ch['id'] == channel_info['id']:
-            return False
-    data['main_channels'].append(channel_info)
-    save_channel_backup(data)
-    return True
-
-def add_backup_channel(channel_info):
-    """ব্যাকআপ চ্যানেল যোগ করো"""
-    data = load_channel_backup()
-    for ch in data['backup_channels']:
-        if ch['id'] == channel_info['id']:
-            return False
-    data['backup_channels'].append(channel_info)
-    save_channel_backup(data)
-    return True
-
-def remove_channel(channel_id):
-    """চ্যানেল রিমুভ করো"""
-    data = load_channel_backup()
-    found = False
-    
-    data['main_channels'] = [ch for ch in data['main_channels'] if ch['id'] != channel_id]
-    data['backup_channels'] = [ch for ch in data['backup_channels'] if ch['id'] != channel_id]
-    
-    if data['active_channel'] and data['active_channel']['id'] == channel_id:
-        data['active_channel'] = None
-    
-    save_channel_backup(data)
-    return True
-
-async def check_main_channel_status(acc_id, main_channel_info):
-    """মূল চ্যানেল চেক করে - কিক/রেস্ট্রিক্টেড কিনা"""
-    if acc_id not in account_clients:
-        return False, "Account not connected"
-    
-    client = account_clients[acc_id]
-    try:
-        channel_entity = await client.get_entity(int(main_channel_info['id']))
-        
-        try:
-            me = await client.get_me()
-            participant = await client(GetParticipantRequest(
-                channel=channel_entity,
-                participant=me.id
-            ))
-            return True, "Member"
-        except UserNotParticipantError:
-            return False, "KICKED"
-        except ChatAdminRequiredError:
-            return False, "NO_ACCESS"
-        except Exception as e:
-            err = str(e).upper()
-            if 'USER_NOT_PARTICIPANT' in err:
-                return False, "KICKED"
-            elif 'CHANNEL_PRIVATE' in err:
-                return False, "PRIVATE"
-            elif 'USER_BANNED' in err:
-                return False, "BANNED"
-            return True, f"Unknown: {str(e)[:30]}"
-            
-    except ChannelPrivateError:
-        return False, "CHANNEL_PRIVATE"
-    except ValueError:
-        return False, "INVALID_ID"
-    except Exception as e:
-        return False, f"Error: {str(e)[:30]}"
-
-async def switch_to_backup_channel(acc_id, main_channel, backup_channels):
-    """মূল চ্যানেল ব্যর্থ হলে ব্যাকআপ চ্যানেলে সুইচ করো"""
-    if not backup_channels:
-        return None, "❌ কোনো ব্যাকআপ চ্যানেল নেই!"
-    
-    if acc_id not in account_clients:
-        return None, "❌ Account not connected"
-    
-    client = account_clients[acc_id]
-    
-    for backup_ch in backup_channels:
-        try:
-            entity = await client.get_entity(int(backup_ch['id']))
-            
-            try:
-                await client(JoinChannelRequest(entity))
-                logger.info(f"✅ Joined backup channel: {backup_ch.get('title','?')}")
-                
-                asyncio.create_task(spam_in_channel(acc_id, entity))
-                
-                data = load_channel_backup()
-                data['active_channel'] = backup_ch
-                save_channel_backup(data)
-                
-                return backup_ch, f"✅ ব্যাকআপ চ্যানেলে সুইচ করা হয়েছে: {backup_ch.get('title','?')}"
-                
-            except Exception as e:
-                logger.warning(f"❌ Cannot join {backup_ch.get('title','?')}: {e}")
-                continue
-                
-        except Exception as e:
-            continue
-    
-    return None, "❌ কোনো ব্যাকআপ চ্যানেল জয়ন করতে পারিনি!"
-
-async def spam_in_channel(acc_id, channel_entity):
-    """ব্যাকআপ চ্যানেলে স্প্যাম করো"""
-    account_stop_flags[f"ch_spam_{acc_id}"] = False
-    
-    spam_messages = account_spam_messages.get(acc_id, [
-        get_setting('spam_message', '𝟭𝟬 𝗠𝗜𝗡 𝗩𝗖 ₹𝟰𝟱 𝗕𝗔𝗕𝗬😘')
-    ])
-    
-    client = account_clients.get(acc_id)
-    if not client:
-        return
-    
-    msg_index = 0
-    while not account_stop_flags.get(f"ch_spam_{acc_id}", False):
-        if not get_setting('channel_spam_enabled', True):
-            await asyncio.sleep(5)
-            continue
-        
-        try:
-            emoji = random.choice(['😘', '🔥', '💋', '💖', '✨', '👑'])
-            message = f"{spam_messages[msg_index % len(spam_messages)]} {emoji}"
-            
-            await client.send_message(channel_entity, message)
-            account_stats[acc_id]['spam_sent'] += 1
-            msg_index += 1
-            
-            await asyncio.sleep(random.uniform(5, 15))
-            
-        except FloodWaitError as e:
-            await asyncio.sleep(min(e.seconds, 60))
-        except Exception as e:
-            if 'DEACTIVATED' in str(e).upper() or 'AUTHKEY' in str(e).upper():
-                break
-            await asyncio.sleep(10)
-
-def stop_channel_spam(acc_id):
-    """চ্যানেল স্প্যাম বন্ধ করো"""
-    account_stop_flags[f"ch_spam_{acc_id}"] = True
-
-# ★★★ CHANNEL BACKUP MONITORING LOOP ★★★
-async def monitor_channels_loop():
-    """প্রতি ৩০ সেকেন্ডে চ্যানেল চেক করে - কিক/রেস্ট্রিক্টেড হলে ব্যাকআপে সুইচ"""
-    logger.info("📡★ Channel backup monitor started - checking every 30s!")
-    
-    while not shutdown_event.is_set():
-        try:
-            if not get_setting('channel_backup_enabled', True):
-                await asyncio.sleep(30)
-                continue
-            
-            data = load_channel_backup()
-            main_channels = data.get('main_channels', [])
-            backup_channels = data.get('backup_channels', [])
-            
-            if not main_channels or not backup_channels:
-                await asyncio.sleep(30)
-                continue
-            
-            for acc in active_accounts:
-                acc_id = acc['id']
-                if acc_id not in account_clients:
-                    continue
-                
-                for main_ch in main_channels:
-                    status, reason = await check_main_channel_status(acc_id, main_ch)
-                    
-                    if not status:
-                        logger.warning(f"🚫 Channel issue! {main_ch.get('title','?')}: {reason}")
-                        
-                        backup_ch, msg = await switch_to_backup_channel(acc_id, main_ch, backup_channels)
-                        
-                        try:
-                            bot = Bot(token=BOT_TOKEN)
-                            await bot.send_message(
-                                chat_id=OWNER_ID,
-                                text=f"🚫 **চ্যানেল প্রোবলেম!**\n\n"
-                                     f"📛 চ্যানেল: {main_ch.get('title','?')}\n"
-                                     f"⚠️ কারণ: {reason}\n"
-                                     f"🕐 সময়: {datetime.now().strftime('%H:%M:%S')}\n\n"
-                                     f"{msg}",
-                                parse_mode='Markdown'
-                            )
-                        except:
-                            pass
-                        
-                        if not backup_ch:
-                            logger.warning("⚠️ No backup channel! Activating backup account...")
-                            backups = get_backup_accounts()
-                            if backups:
-                                await add_backup_to_running(backups[0])
-                        
-                        break
-                
-                await asyncio.sleep(5)
-            
-            await asyncio.sleep(get_setting('channel_check_interval', 30))
-            
-        except Exception as e:
-            logger.error(f"Channel monitor error: {e}")
-            await asyncio.sleep(30)
-
-# ========== AUTOJOIN ==========
+# ====== AUTO-JOIN LINKS ======
 def load_autojoin_links():
-    return load_json(AUTOJOIN_FILE, [])
+    return load_json(AUTOJOIN_LINKS_FILE, [])
 
 def save_autojoin_links(links):
-    save_json(AUTOJOIN_FILE, links)
+    return save_json(AUTOJOIN_LINKS_FILE, links)
 
-def add_autojoin_link(link):
-    links = load_autojoin_links()
-    if link not in links:
-        links.append(link)
-        save_autojoin_links(links)
-        return True
-    return False
-
-def remove_autojoin_link(link):
-    links = load_autojoin_links()
-    if link in links:
-        links.remove(link)
-        save_autojoin_links(links)
-        return True
-    return False
-
-# ========== HARDENING TASKS ==========
+# ====== HARDEN TASKS ======
 def load_harden_tasks():
-    return load_json(HARDENING_TASKS_FILE, {})
+    return load_json(HARDEN_TASKS_FILE, {})
 
-def save_harden_tasks(tasks):
-    save_json(HARDENING_TASKS_FILE, tasks)
+def save_harden_tasks(data):
+    return save_json(HARDEN_TASKS_FILE, data)
 
-def add_harden_task(acc_id, task_type, status='pending'):
-    tasks = load_harden_tasks()
-    if acc_id not in tasks:
-        tasks[acc_id] = []
-    tasks[acc_id].append({
-        'type': task_type,
-        'status': status,
-        'created_at': datetime.now().isoformat(),
-        'completed_at': None
+# ====== REPLIES ======
+def load_replies():
+    return load_json(REPLIES_FILE, [])
+
+def save_replies(data):
+    return save_json(REPLIES_FILE, data)
+
+# ====== AUTO-DELETE TIMER SYSTEM ======
+def load_auto_delete_data():
+    """Load auto-delete timer settings."""
+    return load_json(AUTO_DELETE_FILE, {
+        "enabled": False,
+        "days": 1,
+        "chats": {},
+        "deleted_count": 0
     })
-    save_harden_tasks(tasks)
 
-def update_harden_task(acc_id, task_type, status='completed'):
-    tasks = load_harden_tasks()
-    if acc_id in tasks:
-        for t in tasks[acc_id]:
-            if t['type'] == task_type:
-                t['status'] = status
-                t['completed_at'] = datetime.now().isoformat()
-                break
-        save_harden_tasks(tasks)
+def save_auto_delete_data(data):
+    """Save auto-delete timer settings."""
+    return save_json(AUTO_DELETE_FILE, data)
 
-# ========== NOTIFICATIONS ==========
-async def send_logout_notification(acc, reason="Unknown"):
-    if not logout_notification_enabled:
-        return
-    try:
-        name = acc.get('name', 'Unknown')
-        phone = acc.get('phone', 'N/A')
-        acc_id = acc.get('id', '?')
-        bot = Bot(token=BOT_TOKEN)
-        await bot.send_message(chat_id=OWNER_ID,
-            text=f"🚫 **ACCOUNT LOGOUT!**\n\n"
-                 f"👤 Name: {name}\n🆔 ID: {acc_id}\n📱 Phone: {phone}\n"
-                 f"⚠️ Reason: {reason}\n🕐 Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
-                 f"🔄 ব্যাকআপ অ্যাক্টিভেট হচ্ছে...",
-            parse_mode='Markdown')
-    except:
-        pass
+def register_chat_for_auto_delete(phone, chat_id, chat_title=""):
+    """Register a chat for auto-delete tracking."""
+    data = load_auto_delete_data()
+    key = f"{phone}:{chat_id}"
+    now = datetime.now(timezone.utc).isoformat()
+    data["chats"][key] = {
+        "phone": phone,
+        "chat_id": chat_id,
+        "chat_title": chat_title,
+        "registered_at": now,
+        "last_message_at": now
+    }
+    save_auto_delete_data(data)
+    return True
 
-async def send_backup_activation_notification(backup):
-    if not logout_notification_enabled:
-        return
-    try:
-        bot = Bot(token=BOT_TOKEN)
-        await bot.send_message(chat_id=OWNER_ID,
-            text=f"✅ **ব্যাকআপ অ্যাক্টিভেটেড!**\n\n"
-                 f"👤 New: {backup.get('name', 'Unknown')}\n📱 Phone: {backup.get('phone', 'N/A')}\n"
-                 f"🕐 Time: {datetime.now().strftime('%H:%M:%S')}\n\n⚡ System back online!",
-            parse_mode='Markdown')
-    except:
-        pass
-
-async def send_channel_switch_notification(main_ch, backup_ch, reason):
-    try:
-        bot = Bot(token=BOT_TOKEN)
-        await bot.send_message(chat_id=OWNER_ID,
-            text=f"🔄 **চ্যানেল সুইচ!**\n\n"
-                 f"📛 আগের: {main_ch.get('title','?')}\n"
-                 f"✅ নতুন: {backup_ch.get('title','?')}\n"
-                 f"⚠️ কারণ: {reason}\n"
-                 f"🕐 সময়: {datetime.now().strftime('%H:%M:%S')}",
-            parse_mode='Markdown')
-    except:
-        pass
-
-# ========== ★★★ RESTRICTED ACCOUNT AUTO LOGOUT ★★★ ==========
-async def check_restricted_accounts_loop():
-    """প্রতি ২ সেকেন্ডে সব অ্যাকাউন্ট চেক করে"""
-    logger.info("🔍 Restricted checker started - every 2 seconds!")
-    while not shutdown_event.is_set():
+async def auto_delete_messages_loop(app=None):
+    """Background loop that checks every 30 min and deletes messages older than N days."""
+    await asyncio.sleep(60)
+    while True:
         try:
-            for acc in list(active_accounts):
-                acc_id = acc['id']
-                if acc_id not in account_clients:
+            data = load_auto_delete_data()
+            if not data.get("enabled", False):
+                await asyncio.sleep(1800)
+                continue
+
+            days = data.get("days", 1)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            deleted_count = data.get("deleted_count", 0)
+            chats_to_remove = []
+
+            for key, info in data["chats"].items():
+                phone = info.get("phone")
+                chat_id = info.get("chat_id")
+                last_msg_str = info.get("last_message_at")
+
+                if not last_msg_str or not phone or not chat_id:
                     continue
-                
-                try:
-                    client = account_clients[acc_id]
-                    me = await client.get_me()
-                    
-                    if not me:
-                        logger.warning(f"⚠️ Null user for {acc.get('name','?')}")
-                        await send_logout_notification(acc, "Session null")
-                        asyncio.create_task(handle_banned(acc))
-                        continue
-                    
-                    if hasattr(me, 'restricted') and me.restricted:
-                        logger.warning(f"🚫 RESTRICTED: {acc.get('name','?')}")
-                        await send_logout_notification(acc, "Account Restricted by Telegram")
-                        asyncio.create_task(handle_banned(acc))
-                        continue
-                    
-                    if hasattr(me, 'deleted') and me.deleted:
-                        logger.warning(f"🗑️ DELETED: {acc.get('name','?')}")
-                        await send_logout_notification(acc, "Account Deleted")
-                        asyncio.create_task(handle_banned(acc))
-                        continue
-                    
-                except (AuthKeyUnregisteredError, UserDeactivatedError) as e:
-                    logger.warning(f"🔴 Auth failed for {acc.get('name','?')}: {str(e)[:30]}")
-                    await send_logout_notification(acc, str(e)[:50])
-                    asyncio.create_task(handle_banned(acc))
-                except Exception as e:
-                    err_str = str(e).upper()
-                    if 'FLOOD' in err_str:
-                        pass
-                    elif 'AUTHKEY' in err_str or 'DEACTIVATED' in err_str or 'SESSION' in err_str:
-                        await send_logout_notification(acc, str(e)[:50])
-                        asyncio.create_task(handle_banned(acc))
-            
-            await asyncio.sleep(2)
-            
-        except Exception as e:
-            logger.error(f"Restricted checker error: {e}")
-            await asyncio.sleep(2)
 
-# ========== KEEPALIVE ==========
-async def keep_alive_loop(acc_id, client, interval=30):
-    while not account_stop_flags.get(acc_id, False):
-        try:
-            me = await client.get_me()
-            if me:
                 try:
-                    await client(UpdateStatusRequest(offline=False))
+                    last_msg_time = datetime.fromisoformat(last_msg_str)
+                    if last_msg_time.tzinfo is None:
+                        last_msg_time = last_msg_time.replace(tzinfo=timezone.utc)
                 except:
-                    pass
-            else:
-                raise AuthKeyUnregisteredError("Session returned None")
-        except (AuthKeyUnregisteredError, UserDeactivatedError) as e:
-            real_acc = find_account(acc_id)
-            if real_acc:
-                await send_logout_notification(real_acc, str(e)[:50])
-                asyncio.create_task(handle_banned(real_acc))
-            return
-        except:
-            await asyncio.sleep(5)
-        for _ in range(interval):
-            if account_stop_flags.get(acc_id, False):
-                break
-            await asyncio.sleep(1)
+                    continue
 
-async def check_account_status_periodically():
-    while not shutdown_event.is_set():
-        try:
-            for acc in list(active_accounts):
-                acc_id = acc['id']
-                if acc_id in account_clients:
+                if last_msg_time < cutoff:
+                    # Try to delete outgoing messages
                     try:
-                        me = await account_clients[acc_id].get_me(timeout=5)
-                        if not me:
-                            raise AuthKeyUnregisteredError("No user returned")
-                    except (AuthKeyUnregisteredError, UserDeactivatedError) as e:
-                        await send_logout_notification(acc, str(e)[:50])
-                        asyncio.create_task(handle_banned(acc))
+                        c = None
+                        for ac in active_accounts:
+                            if ac.get('phone') == phone and ac['id'] in account_clients:
+                                c = account_clients[ac['id']]
+                                break
+                        
+                        if c:
+                            try:
+                                async for msg in c.iter_messages(int(chat_id), limit=100):
+                                    if msg and msg.out and msg.date and msg.date.replace(tzinfo=timezone.utc) if msg.date.tzinfo is None else msg.date < cutoff:
+                                        try:
+                                            await c.delete_messages(int(chat_id), [msg.id])
+                                            deleted_count += 1
+                                            await asyncio.sleep(0.5)
+                                        except:
+                                            pass
+                            except Exception as e:
+                                logger.debug(f"Fetch error {chat_id}: {e}")
                     except:
                         pass
-        except:
-            pass
-        await asyncio.sleep(10)
 
-# ========== ACCOUNT START/STOP ==========
+                    chats_to_remove.append(key)
+
+            for key in chats_to_remove:
+                data["chats"].pop(key, None)
+
+            data["deleted_count"] = deleted_count
+            save_auto_delete_data(data)
+
+        except Exception as e:
+            logger.error(f"Auto-delete loop error: {e}")
+
+        await asyncio.sleep(1800)
+
+# ====== ENCRYPTION ======
+def encrypt_data(data: str) -> str:
+    if not data:
+        return data
+    try:
+        from cryptography.fernet import Fernet
+        key = base64.urlsafe_b64encode(CRYPTO_KEY[:32])
+        f = Fernet(key)
+        return f.encrypt(data.encode()).decode()
+    except Exception as e:
+        logger.error(f"Encryption error: {e}")
+        return base64.b64encode(data.encode()).decode()
+
+def decrypt_data(data: str) -> str:
+    if not data:
+        return data
+    try:
+        from cryptography.fernet import Fernet
+        key = base64.urlsafe_b64encode(CRYPTO_KEY[:32])
+        f = Fernet(key)
+        return f.decrypt(data.encode()).decode()
+    except Exception as e:
+        logger.error(f"Decryption error: {e}")
+        try:
+            return base64.b64decode(data.encode()).decode()
+        except:
+            return data
+
+# ====== CLIENT MANAGEMENT ======
+async def create_client(phone, session_name=None):
+    if session_name is None:
+        session_name = f"session_{phone}"
+    session_path = USER_DATA_DIR / session_name
+    client = TelegramClient(
+        str(session_path),
+        API_ID,
+        API_HASH,
+        proxy=PROXY_CONFIG,
+        device_model="HackerAI Pentest",
+        system_version="4.16.30-vx",
+        app_version="1.0.0",
+        connection_retries=5,
+        retry_delay=2
+    )
+    return client
+
+async def start_client(phone, client):
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return False, "Not authorized"
+        return True, "Connected"
+    except Exception as e:
+        return False, str(e)
+
+async def stop_client(phone):
+    for ac in active_accounts:
+        if ac.get('phone') == phone and ac['id'] in account_clients:
+            try:
+                await account_clients[ac['id']].disconnect()
+            except:
+                pass
+            if ac['id'] in account_clients:
+                del account_clients[ac['id']]
+
 async def start_account(acc):
     try:
-        proxy_config = acc.get('proxy')
-        proxy = None
-        if proxy_config and proxy_config.get('addr'):
-            proxy = (socks.SOCKS5, proxy_config.get('addr', ''), proxy_config.get('port', 1080),
-                     proxy_config.get('rdns', True), proxy_config.get('username', ''), proxy_config.get('password', ''))
-        client = TelegramClient(StringSession(acc['session']), acc.get('api_id', DEFAULT_API_ID),
-                                acc.get('api_hash', DEFAULT_API_HASH), proxy=proxy, 
-                                sequential_updates=True, receive_updates=True)
-        await client.start()
-        me = await client.get_me()
-        acc_id = acc['id']
-        custom_msgs = load_spam_messages()
-        if custom_msgs:
-            account_spam_messages[acc_id] = [m['text'] for m in custom_msgs]
-        else:
-            base_msg = get_setting('spam_message', '𝟭𝟬 𝗠𝗜𝗡 𝗩𝗖 ₹𝟰𝟱 𝗕𝗔𝗕𝗬😘')
-            account_spam_messages[acc_id] = [
-                f"{base_msg} ✨", f"{base_msg} 💋", f"{base_msg} 🔥", 
-                f"{base_msg} 💖", f"🔥 {base_msg}", f"💋 {base_msg}", 
-                f"✨ {base_msg} 😘", f"{base_msg} 👑"
-            ]
-        if acc_id in account_keepalive_tasks:
-            account_keepalive_tasks[acc_id].cancel()
-        account_keepalive_tasks[acc_id] = asyncio.create_task(keep_alive_loop(acc_id, client, interval=30))
-        return client
-    except (AuthKeyUnregisteredError, UserDeactivatedError) as e:
-        await send_logout_notification(acc, str(e)[:50])
-        asyncio.create_task(handle_banned(acc))
-        return None
-    except Exception as e:
-        logger.error(f"Start account failed: {e}")
-        return None
-
-async def handle_banned(acc):
-    """অ্যাকাউন্ট ব্যান/রেস্ট্রিক্ট হলে"""
-    acc_id = acc['id']
-    name = acc.get('name', 'Unknown')
-    
-    stop_channel_spam(acc_id)
-    
-    banned = load_json(BANNED_FILE, [])
-    if not any(b['id'] == acc_id for b in banned):
-        banned.append({
-            'id': acc_id, 'name': name, 'phone': acc.get('phone', 'N/A'), 
-            'banned_at': datetime.now().isoformat()
-        })
-        save_json(BANNED_FILE, banned)
-    
-    if acc_id in account_keepalive_tasks and not account_keepalive_tasks[acc_id].done():
-        account_keepalive_tasks[acc_id].cancel()
-        try: await account_keepalive_tasks[acc_id]
-        except: pass
-        del account_keepalive_tasks[acc_id]
-    
-    active_accounts[:] = [a for a in active_accounts if a['id'] != acc_id]
-    
-    if acc_id in account_clients:
-        try:
-            await account_clients[acc_id].disconnect()
-            await asyncio.sleep(0.3)
-        except: pass
-        del account_clients[acc_id]
-    
-    if acc_id in account_spam_tasks and not account_spam_tasks[acc_id].done():
-        account_spam_tasks[acc_id].cancel()
-        try: await account_spam_tasks[acc_id]
-        except: pass
-        del account_spam_tasks[acc_id]
-    
-    account_stop_flags[acc_id] = True
-    for d in [account_spam_active, account_stats]:
-        if acc_id in d: del d[acc_id]
-    
-    remove_account_data(acc_id)
-    
-    backups = get_backup_accounts()
-    if backups:
-        backup = backups[0]
-        backup_copy = dict(backup)
-        backup_copy['is_backup'] = False
-        backup_copy['enabled'] = True
-        remove_account_data(backup['id'])
-        add_account_data(backup_copy, is_backup=False)
-        await send_backup_activation_notification(backup_copy)
-        client = await start_account(backup_copy)
-        if client:
-            active_accounts.append(backup_copy)
-            account_clients[backup_copy['id']] = client
-            account_stats[backup_copy['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-            account_stop_flags[backup_copy['id']] = False
-            account_spam_active[backup_copy['id']] = False
-            register_ar(client, backup_copy)
-    else:
-        logger.warning("⚠️ No backup accounts!")
-
-# ========== BACKUP TO RUNNING ==========
-async def add_backup_to_running(backup_acc):
-    """ব্যাকআপ অ্যাকাউন্ট ১ ক্লিকে রানিং"""
-    acc_id = backup_acc['id']
-    if any(a['id'] == acc_id for a in active_accounts):
-        return False, "❌ Already running!"
-    
-    d = load_accounts_data()
-    d['backup'] = [a for a in d['backup'] if a['id'] != acc_id]
-    backup_acc['is_backup'] = False
-    backup_acc['enabled'] = True
-    d['main'].append(backup_acc)
-    save_json(ACCOUNTS_FILE, d)
-    
-    client = await start_account(backup_acc)
-    if client:
-        active_accounts.append(backup_acc)
-        account_clients[backup_acc['id']] = client
-        account_stats[backup_acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-        account_stop_flags[backup_acc['id']] = False
-        account_spam_active[backup_acc['id']] = False
-        register_ar(client, backup_acc)
-        return True, f"✅ {backup_acc.get('name','?')} রানিং হয়েছে!"
-    else:
-        return False, "❌ Start failed!"
-
-# ========== AUTO JOIN ==========
-async def auto_join_groups_for_account(acc):
-    if not get_setting('auto_join_enabled', True):
-        return
-    acc_id = acc['id']
-    if acc_id not in account_clients:
-        return
-    client = account_clients[acc_id]
-    links = load_autojoin_links()
-    if not links:
-        return
-    joined = 0
-    for link in links:
-        try:
-            if account_stop_flags.get(acc_id, False):
-                break
-            if 't.me/' in link or 'telegram.me/' in link:
-                username = link.split('/')[-1].split('?')[0]
-                if username:
-                    try:
-                        entity = await client.get_entity(username)
-                        if hasattr(entity, 'title'):
-                            await client(JoinChannelRequest(entity))
-                            joined += 1
-                            await asyncio.sleep(3)
-                    except FloodWaitError as e:
-                        await asyncio.sleep(min(e.seconds, 30))
-                    except:
-                        pass
-        except:
-            pass
-    if joined > 0:
-        logger.info(f"📌 {acc.get('name','?')} joined {joined} groups")
-
-# ========== ★★ REPLACED: 24hr Logout Timer → 1 Day Auto Delete ★★ ==========
-async def schedule_auto_delete_messages(acc_id, client, days=1):
-    """প্রতি ১ দিন পর চ্যাটের মেসেজ অটো ডিলিট করে"""
-    while not account_stop_flags.get(acc_id, False):
-        try:
-            await asyncio.sleep(days * 86400)  # ১ দিন অপেক্ষা
-            
-            if account_stop_flags.get(acc_id, False):
-                break
-            
-            # সব ডায়ালগ থেকে মেসেজ ডিলিট
-            dialogs = await client.get_dialogs(limit=200)
-            deleted_count = 0
-            
-            for dialog in dialogs:
-                if account_stop_flags.get(acc_id, False):
-                    break
-                
-                try:
-                    entity = dialog.entity
-                    chat_id = dialog.id
-                    chat_title = getattr(entity, 'title', None) or getattr(entity, 'first_name', 'Unknown')
-                    
-                    # টাইমারে রেজিস্টার
-                    register_chat_for_auto_delete(acc_id, chat_id, str(chat_title))
-                    
-                    # ডায়লগের সব মেসেজ ডিলিট
-                    async for msg in client.iter_messages(entity, limit=200):
-                        try:
-                            await client.delete_messages(entity, [msg.id], revoke=True)
-                            deleted_count += 1
-                        except:
-                            pass
-                        await asyncio.sleep(0.05)
-                    
-                    logger.info(f"🧹 Auto-deleted chat: {chat_title}")
-                    
-                except Exception as e:
-                    # সাইলেন্ট ফল-ব্যাক
-                    pass
-                
-                await asyncio.sleep(0.3)
-            
-            if deleted_count > 0:
-                logger.info(f"🧹 Total auto-deleted: {deleted_count} messages for acc {acc_id}")
-                
-                # টাইমার ডাটা আপডেট
-                timer_data = load_auto_delete_timers()
-                timer_data['deleted_messages'] += deleted_count
-                timer_data['last_cleanup'] = datetime.now().isoformat()
-                save_auto_delete_timers(timer_data)
-            
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error(f"Auto delete error for {acc_id}: {e}")
-            await asyncio.sleep(60)
-
-# ========== ★★ MODIFIED HARDEN: removed 24hr wait, added 1day auto-delete ★★ ==========
-async def harden_account_one_click(acc):
-    acc_id = acc['id']
-    if acc_id not in account_clients:
-        return "❌ Account not connected!"
-    
-    client = account_clients[acc_id]
-    results = []
-    
-    try:
-        new_name = get_setting('new_account_name', '')
-        if new_name:
-            try:
-                parts = new_name.split(' ', 1)
-                first = parts[0]
-                last = parts[1] if len(parts) > 1 else ''
-                await client(functions.account.UpdateProfileRequest(first_name=first, last_name=last))
-                results.append("✅ Name changed")
-            except Exception as e:
-                results.append(f"❌ Name: {str(e)[:30]}")
-        
-        new_bio = get_setting('new_account_bio', '')
-        if new_bio:
-            try:
-                await client(functions.account.UpdateProfileRequest(about=new_bio))
-                results.append("✅ Bio changed")
-            except:
-                results.append("❌ Bio failed")
-        
-        # ★★ REMOVED: 24hr logout timer check - now directly removes all other devices ★★
-        try:
-            auths = await client(functions.account.GetAuthorizationsRequest())
-            current_hash = getattr(auths.authorizations[0], 'hash', 0) if auths.authorizations else 0
-            other_devices = [a for a in auths.authorizations if a.hash != current_hash]
-            
-            if other_devices:
-                removed = 0
-                for dev in other_devices:
-                    try:
-                        await client(functions.account.ResetAuthorizationRequest(dev.hash))
-                        removed += 1
-                    except:
-                        pass
-                
-                if removed > 0:
-                    results.append(f"✅ {removed} devices removed immediately")
-                else:
-                    results.append("✅ Could not remove devices")
-            else:
-                results.append("✅ No other devices")
-        except Exception as e:
-            results.append(f"⚠️ Devices: {str(e)[:30]}")
-        
-        if get_setting('harden_set_2fa', True):
-            try:
-                twofa_password = f"Secure@{random.randint(1000,9999)}#{acc.get('phone','')[-4:]}"
-                await client(functions.account.SetPasswordRequest(
-                    new_password=twofa_password,
-                    new_hint=f"acc_{acc.get('phone','')[-4:]}",
-                    email=None
-                ))
-                results.append(f"✅ 2FA set! Pass: `{twofa_password}`")
-                
-                twofa_data = load_json(TWOPA_FILE, {})
-                twofa_data[acc_id] = {'phone': acc.get('phone', ''), 'password': twofa_password, 'set_at': datetime.now().isoformat()}
-                save_json(TWOPA_FILE, twofa_data)
-            except Exception as e:
-                results.append(f"⚠️ 2FA: {str(e)[:30]}")
-        
-        try:
-            dialogs = await client.get_dialogs(limit=200)
-            leave_count = 0
-            clear_count = 0
-            
-            for dialog in dialogs:
-                if account_stop_flags.get(acc_id, False): break
-                try:
-                    entity = dialog.entity
-                    if hasattr(entity, 'title'):
-                        try:
-                            await client(LeaveChannelRequest(entity))
-                            leave_count += 1
-                        except:
-                            try:
-                                from telethon.tl.functions.messages import DeleteChatUserRequest
-                                await client(DeleteChatUserRequest(chat_id=entity, user_id='me'))
-                                leave_count += 1
-                            except: pass
-                    
-                    try:
-                        await client(DeleteHistoryRequest(peer=entity, max_id=0, just_clear=True, revoke=False))
-                        clear_count += 1
-                    except: pass
-                    
-                    await asyncio.sleep(0.3)
-                except: pass
-            
-            results.append(f"✅ Left {leave_count}, Cleared {clear_count}")
-        except Exception as e:
-            results.append(f"⚠️ Leave/Clear: {str(e)[:30]}")
-        
-        try:
-            await auto_join_groups_for_account(acc)
-            results.append("✅ Auto-join done")
-        except:
-            results.append("⚠️ Auto-join failed")
-        
-        # ★★ NEW: 1 Day Auto Delete Timer instead of schedule_auto_clear_chat ★★
-        try:
-            asyncio.create_task(schedule_auto_delete_messages(acc_id, client, days=get_setting('auto_delete_timer_days', 1)))
-            results.append(f"✅ Auto-delete timer set: {get_setting('auto_delete_timer_days', 1)} day(s)")
-        except:
-            results.append("⚠️ Auto-delete timer failed")
-        
+        client = TelegramClient(
+            StringSession(acc.get('session', '')),
+            acc.get('api_id', API_ID),
+            acc.get('api_hash', API_HASH),
+            proxy=PROXY_CONFIG
+        )
+        await client.connect()
         me = await client.get_me()
         if me:
-            acc['name'] = f"{me.first_name or ''} {me.last_name or ''}".strip()
-            acc['phone'] = me.phone or acc.get('phone', 'N/A')
-            d = load_accounts_data()
-            for key in ['main', 'backup']:
-                for i, a in enumerate(d[key]):
-                    if a['id'] == acc_id:
-                        d[key][i] = acc
+            return client
+        return None
+    except Exception as e:
+        logger.error(f"Failed to start account {acc.get('name','?')}: {e}")
+        return None
+
+async def get_device_login_info(aid):
+    acc = find_account(aid)
+    if not acc:
+        return "Account not found"
+    try:
+        client = TelegramClient(
+            StringSession(acc.get('session', '')),
+            acc.get('api_id', API_ID),
+            acc.get('api_hash', API_HASH),
+            proxy=PROXY_CONFIG
+        )
+        await client.connect()
+        auths = await client(functions.account.GetAuthorizationsRequest())
+        txt = f"**Devices for {acc.get('name','?')}**\n\n"
+        for a in auths.authorizations:
+            txt += f"• {a.device_model} | {a.app_name} {a.app_version}\n"
+            txt += f"  IP: {a.ip} | {a.country}\n"
+            txt += f"  Date: {a.date_created}\n"
+            if a.current:
+                txt += "  ✅ CURRENT\n"
+            txt += "\n"
+        await client.disconnect()
+        return txt or "No devices found"
+    except Exception as e:
+        return f"Error: {str(e)[:100]}"
+
+async def harden_account_one_click(acc):
+    """Complete account hardening without 24-hour logout timer."""
+    results = []
+    try:
+        client = TelegramClient(
+            StringSession(acc.get('session', '')),
+            acc.get('api_id', API_ID),
+            acc.get('api_hash', API_HASH),
+            proxy=PROXY_CONFIG
+        )
+        await client.connect()
+        me = await client.get_me()
+        if not me:
+            return "❌ Not authorized"
+        
+        # 1. Revoke ALL old sessions immediately (no 24-hour timer)
+        try:
+            auths = await client(functions.account.GetAuthorizationsRequest())
+            revoked = 0
+            for auth in auths.authorizations:
+                if not auth.current:
+                    try:
+                        await client(functions.account.ResetAuthorizationRequest(hash=auth.hash))
+                        revoked += 1
+                        await asyncio.sleep(0.5)
+                    except:
+                        pass
+            results.append(f"✅ Revoked {revoked} old sessions")
+        except Exception as e:
+            results.append(f"⚠️ Session revoke: {str(e)[:50]}")
+        
+        # 2. Set privacy settings
+        try:
+            privacy_sets = [
+                (types.InputPrivacyKeyStatusTimestamp(), [types.InputPrivacyValueAllowAll()]),
+                (types.InputPrivacyKeyProfilePhoto(), [types.InputPrivacyValueAllowContacts()]),
+                (types.InputPrivacyKeyForwards(), [types.InputPrivacyValueAllowContacts()]),
+                (types.InputPrivacyKeyChatInvite(), [types.InputPrivacyValueAllowAll()]),
+                (types.InputPrivacyKeyPhoneNumber(), [types.InputPrivacyValueDisallowAll()]),
+                (types.InputPrivacyKeyAddedByPhone(), [types.InputPrivacyValueDisallowAll()]),
+                (types.InputPrivacyKeyPhoneCall(), [types.InputPrivacyValueAllowContacts()]),
+                (types.InputPrivacyKeyPhoneP2P(), [types.InputPrivacyValueDisallowAll()]),
+                (types.InputPrivacyKeyAbout(), [types.InputPrivacyValueAllowContacts()])
+            ]
+            for key, val in privacy_sets:
+                try:
+                    await client(functions.account.SetPrivacyRequest(key=key, rules=val))
+                except:
+                    pass
+            results.append("✅ Privacy settings hardened")
+        except Exception as e:
+            results.append(f"⚠️ Privacy: {str(e)[:50]}")
+        
+        # 3. Change profile - set name and bio if configured
+        new_name = get_setting('new_account_name', '')
+        new_bio = get_setting('new_account_bio', '')
+        try:
+            if new_name:
+                await client(functions.account.UpdateProfileRequest(first_name=new_name))
+                results.append(f"✅ Name changed to: {new_name}")
+            if new_bio:
+                await client(functions.account.UpdateProfileRequest(about=new_bio))
+                results.append(f"✅ Bio updated")
+        except Exception as e:
+            results.append(f"⚠️ Profile update: {str(e)[:50]}")
+        
+        # 4. Leave all groups/channels
+        try:
+            left_count = 0
+            async for dialog in client.iter_dialogs():
+                if dialog.is_group or dialog.is_channel:
+                    try:
+                        await client(functions.channels.LeaveChannelRequest(channel=dialog.entity))
+                        left_count += 1
+                        await asyncio.sleep(0.5)
+                    except:
+                        pass
+                    if left_count >= 50:
                         break
-            save_json(ACCOUNTS_FILE, d)
+            results.append(f"✅ Left {left_count} groups/channels")
+        except Exception as e:
+            results.append(f"⚠️ Leave groups: {str(e)[:50]}")
+        
+        # 5. Auto-join configured links
+        try:
+            links = load_autojoin_links()
+            joined = 0
+            for link in links:
+                try:
+                    if 'joinchat' in link or '+' in link:
+                        hash_val = link.split('/')[-1].split('+')[-1]
+                        await client(functions.messages.ImportChatInviteRequest(hash=hash_val))
+                    else:
+                        username = link.split('/')[-1].replace('@', '')
+                        await client(functions.channels.JoinChannelRequest(channel=username))
+                    joined += 1
+                    await asyncio.sleep(1)
+                except:
+                    pass
+            if joined:
+                results.append(f"✅ Joined {joined} groups")
+        except Exception as e:
+            results.append(f"⚠️ Auto-join: {str(e)[:50]}")
+        
+        # 6. Register for auto-delete timer (1 day)
+        phone = acc.get('phone', me.phone or 'unknown')
+        try:
+            async for dialog in client.iter_dialogs():
+                register_chat_for_auto_delete(phone, dialog.id, dialog.name or str(dialog.id))
+            results.append("✅ Auto-delete timer registered (1 day)")
+        except Exception as e:
+            results.append(f"⚠️ Auto-delete reg: {str(e)[:30]}")
+        
+        await client.disconnect()
+        
+        # Save hardening task record
+        tasks = load_harden_tasks()
+        if acc['id'] not in tasks:
+            tasks[acc['id']] = []
+        tasks[acc['id']].append({
+            'type': 'full_harden',
+            'status': 'completed',
+            'created_at': datetime.now().isoformat(),
+            'results': results
+        })
+        save_harden_tasks(tasks)
         
         return "\n".join(results)
+        
     except Exception as e:
-        return f"❌ Harden failed: {str(e)[:100]}"
+        return f"❌ Hardening failed: {str(e)[:200]}"
 
-# ========== REMOVED: Old schedule_auto_clear_chat (replaced by schedule_auto_delete_messages) ==========
-
-# ========== AUTO REPLY ==========
-ALL_EMOJIS = ['😀','😃','😄','😁','😆','😅','😉','🙈','😊','😇','🥰','😍','🤩','😘']
-
-def get_random_emoji():
-    return random.choice(ALL_EMOJIS)
-
-_user_last_msg_time = {}
-
-def register_ar(client, acc):
-    @client.on(events.NewMessage(incoming=True))
-    async def auto_reply_handler(event):
+# ====== BACKGROUND TASKS ======
+async def keepalive_loop():
+    """Keep accounts alive by periodic ping."""
+    while True:
         try:
-            if not auto_reply_enabled: return
-            if not event.is_private: return
-            sender = await event.get_sender()
-            if not sender: return
-            uid = sender.id
-            if uid == OWNER_ID or uid in admins: return
-            if not acc.get('enabled', True): return
-            if uid in processing_users: return
-            processing_users.add(uid)
-            try:
-                if uid not in customer_count: customer_count[uid] = 0
-                await process_auto_reply_fast(event, client, acc, uid)
-            finally:
-                processing_users.discard(uid)
+            for aid, client in list(account_clients.items()):
+                try:
+                    me = await client.get_me()
+                    if not me:
+                        logger.warning(f"Account {aid} disconnected")
+                except:
+                    logger.warning(f"Account {aid} keepalive failed")
+                    if aid in account_clients:
+                        try:
+                            await account_clients[aid].disconnect()
+                        except:
+                            pass
+                        del account_clients[aid]
+                    # Try to reconnect
+                    acc = find_account(aid)
+                    if acc:
+                        try:
+                            nc = await start_account(acc)
+                            if nc:
+                                account_clients[aid] = nc
+                                logger.info(f"Reconnected {aid}")
+                        except:
+                            pass
+            await asyncio.sleep(300)
         except Exception as e:
-            logger.error(f"AR error: {e}")
-    return auto_reply_handler
+            logger.error(f"Keepalive loop: {e}")
+            await asyncio.sleep(60)
 
-async def process_auto_reply_fast(event, client, acc, uid):
-    global _user_last_msg_time
-    chat_id = event.chat_id
-    message_text = event.message.text or ""
-    if uid not in customer_count: customer_count[uid] = 0
-    msg_count = customer_count[uid]
-    
-    if event.message.photo or (event.message.document and event.message.document.mime_type and 'image' in event.message.document.mime_type):
-        if get_setting('block_photo_enabled', True):
-            asyncio.create_task(block_user_and_delete_photos(event, client, uid))
-        else:
-            asyncio.create_task(handle_payment_screenshot(event, client, uid))
-        return
-    
-    if not message_text.strip(): return
-    msg_lower = message_text.lower().strip()
-    
-    current_time = time.time()
-    last_time = _user_last_msg_time.get(uid, 0)
-    time_diff = current_time - last_time
-    _user_last_msg_time[uid] = current_time
-    
-    if time_diff < 5 and msg_count > 0:
+async def account_health_loop():
+    """Monitor account health and report issues."""
+    while True:
         try:
-            input_chat = await event.get_input_chat()
-            await client(ReadHistoryRequest(peer=input_chat, max_id=event.message.id))
-        except: pass
-        customer_count[uid] = msg_count + 1
-        return
-    
-    wait_time = int(get_setting('wait_time', 300))
-    if wait_time > 0:
-        try:
-            input_chat = await event.get_input_chat()
-            await client(ReadHistoryRequest(peer=input_chat, max_id=event.message.id))
-        except: pass
-        await asyncio.sleep(wait_time)
-    
-    if get_setting('typing_enabled', True):
-        typing_duration = int(get_setting('typing_duration', 240))
-        if typing_duration > 0:
-            try:
-                async with client.action(chat_id, 'typing'):
-                    await asyncio.sleep(min(typing_duration, 300))
-            except: pass
-    
-    if msg_count == 0 and get_setting('welcome_enabled', True):
-        welcome_text = get_setting('welcome_message', '🔥 Welcome baby! 🔥')
-        if WELCOME_IMAGE_FILE.exists():
-            try:
-                await client.send_file(chat_id, str(WELCOME_IMAGE_FILE), caption=welcome_text)
-            except:
-                await client.send_message(chat_id, welcome_text)
-        else:
-            await client.send_message(chat_id, welcome_text)
-        await asyncio.sleep(0.5)
-        second_welcome = get_setting('welcome_message_2', '🔥 I am available now! 😘')
-        await client.send_message(chat_id, second_welcome)
-        customer_count[uid] = msg_count + 1
-        return
-    
-    try:
-        input_chat = await event.get_input_chat()
-        await client(ReadHistoryRequest(peer=input_chat, max_id=event.message.id))
-    except: pass
-    
-    ignored = get_setting('ignored_messages', '')
-    if ignored:
-        for line in ignored.split('\n'):
-            if line.strip().lower() == msg_lower:
-                customer_count[uid] = msg_count + 1
-                return
-    
-    replies = load_json(REPLIES_FILE, [])
-    for r in replies:
-        kw = r.get('keyword', '').lower().strip()
-        if r.get('type', 'contains') == 'exact':
-            if msg_lower == kw:
-                await event.respond(r.get('reply', ''))
-                customer_count[uid] = msg_count + 1
-                return
-        else:
-            if kw and kw in msg_lower:
-                await event.respond(r.get('reply', ''))
-                customer_count[uid] = msg_count + 1
-                return
-    
-    payment_keywords = ['pay', 'payment', 'qr', 'scan', 'upi', 'paytm', 'send', 'bhejo', 'screenshot', 'method', 'transfer', 'rupees', 'rs', 'money']
-    if any(kw in msg_lower for kw in payment_keywords):
-        await send_payment_info(client, chat_id, event)
-        customer_count[uid] = msg_count + 1
-        return
-    
-    media_keywords = ['pic', 'photo', 'image', 'nude', 'naked', 'dikhao', 'show', 'nangi', 'boob', 'mms']
-    if any(kw in msg_lower for kw in media_keywords):
-        await event.respond(get_setting('media_keyword_reply', 'Payment first baby 😘🔥'))
-        customer_count[uid] = msg_count + 1
-        return
-    
-    service_keywords = ['service', 'chahiye', 'kharid', 'demo', 'video', 'call', 'vc', 'price', 'rate']
-    if any(kw in msg_lower for kw in service_keywords):
-        await event.respond(get_setting('price_list_text', "🔥 10 MIN VC → ₹99"))
-        await asyncio.sleep(0.3)
-        await event.respond(random.choice(["How many minutes? 🔥", "Pay and enjoy! 😘"]))
-        customer_count[uid] = msg_count + 1
-        return
-    
-    offline_keywords = ['real', 'meet', 'aao', 'ghar', 'location', 'offline']
-    if any(kw in msg_lower for kw in offline_keywords):
-        await event.respond(get_setting('offline_keyword_reply', 'Online only baby 😊'))
-        customer_count[uid] = msg_count + 1
-        return
-    
-    greeting_keywords = ['hi', 'hello', 'hey', 'hii', 'hy', 'hlo', 'hlw', 'helo']
-    if any(w in msg_lower for w in greeting_keywords):
-        greetings = get_setting('greeting_replies', ['Hi baby, ready! 🔥', 'Hey baby! 😘'])
-        await event.respond(random.choice(greetings))
-        customer_count[uid] = msg_count + 1
-        return
-    
-    defaults = get_setting('default_replies', ['Ready baby! Pay karo! 🔥', 'Main ready hoon! 😘'])
-    await event.respond(random.choice(defaults))
-    customer_count[uid] = msg_count + 1
-
-async def send_payment_info(client, chat_id, event):
-    upi = get_setting('upi_id', '')
-    paytm = get_setting('paytm_num', '')
-    payment_msg = "**💰 Payment 💰**\n\n"
-    if upi: payment_msg += f"📱 UPI: {upi}\n"
-    if paytm: payment_msg += f"💳 PayTm: {paytm}\n"
-    payment_msg += f"\n{get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')}"
-    if QR_CODE_FILE.exists():
-        try:
-            await client.send_file(chat_id, str(QR_CODE_FILE), caption=payment_msg)
-            return
-        except: pass
-    await event.respond(payment_msg)
-
-async def block_user_and_delete_photos(event, client, uid):
-    try:
-        input_chat = await event.get_input_chat()
-        try: await client.delete_messages(input_chat, [event.message.id], revoke=True)
-        except: pass
-        try:
-            async for msg in client.iter_messages(input_chat, limit=100):
-                try: await client.delete_messages(input_chat, [msg.id], revoke=True)
-                except: pass
-        except: pass
-        try: await client.delete_dialog(input_chat)
-        except: pass
-        await asyncio.sleep(1)
-        try: await client(BlockRequest(id=uid))
-        except: pass
-        try: await client(DeleteContactsRequest(id=[uid]))
-        except: pass
-    except Exception as e:
-        logger.error(f"Block failed: {e}")
-
-async def handle_payment_screenshot(event, client, uid):
-    try:
-        if event.message.photo: photo = event.message.photo[-1]
-        else: photo = event.message.document
-        file_path = PAYMENT_SS_DIR / f"{uid}_{event.message.id}.jpg"
-        await photo.download_async(str(file_path))
-        customer_payment_photos[uid] = str(file_path)
-        sender_name = getattr(event.sender, 'first_name', 'Unknown')
-        await event.respond("✅ Payment screenshot received!")
-        try:
-            await client.send_message(OWNER_ID, f"💳 **PAYMENT!**\n👤 {sender_name}\n🆔 {uid}", parse_mode='Markdown')
-            await client.send_file(OWNER_ID, str(file_path))
-        except: pass
-        customer_count[uid] = -2
-    except Exception as e:
-        logger.error(f"Payment ss failed: {e}")
-
-async def setup_auto_reply():
-    _load_settings()
-    for acc in get_main_accounts():
-        if acc['id'] not in [a['id'] for a in active_accounts]:
-            client = await start_account(acc)
-            if client:
-                active_accounts.append(acc)
-                account_clients[acc['id']] = client
-                account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                account_stop_flags[acc['id']] = False
-                register_ar(client, acc)
-                
-                # ★★ NEW: Start 1 Day Auto Delete Timer for each account ★★
-                asyncio.create_task(schedule_auto_delete_messages(acc['id'], client, days=get_setting('auto_delete_timer_days', 1)))
-                
-            await asyncio.sleep(1)
-
-# ========== GROUP SPAM ==========
-async def get_user_groups(client):
-    try:
-        dialogs = await client(GetDialogsRequest(offset_date=None, offset_id=0, offset_peer=InputPeerEmpty(), limit=200, hash=0))
-        groups = []
-        for dialog in dialogs.dialogs:
-            try:
-                entity = await client.get_entity(dialog.peer)
-                if hasattr(entity, 'title'):
-                    is_group = (hasattr(entity, 'megagroup') and entity.megagroup) or (hasattr(entity, 'broadcast') and not entity.broadcast) or (not hasattr(entity, 'broadcast') and not hasattr(entity, 'megagroup'))
-                    if is_group: groups.append(entity)
-            except: pass
-        return groups
-    except:
-        return []
-
-async def spam_account(acc):
-    acc_id = acc['id']
-    account_stop_flags[acc_id] = False
-    account_stats[acc_id]['spam_running'] = True
-    account_spam_active[acc_id] = True
-    try:
-        proxy_config = acc.get('proxy')
-        proxy = None
-        if proxy_config and proxy_config.get('addr'):
-            proxy = (socks.SOCKS5, proxy_config.get('addr', ''), proxy_config.get('port', 1080), proxy_config.get('rdns', True), proxy_config.get('username', ''), proxy_config.get('password', ''))
-        client = TelegramClient(StringSession(acc['session']), acc.get('api_id', DEFAULT_API_ID), acc.get('api_hash', DEFAULT_API_HASH), proxy=proxy, receive_updates=False)
-        await client.start()
-        groups = await get_user_groups(client)
-        if not groups:
-            account_stats[acc_id]['spam_running'] = False
-            account_spam_active[acc_id] = False
-            return
-        speed = get_setting('spam_speed', 'medium')
-        speed_configs = {
-            'super_fast': {'batch_size': 999, 'batch_delay': 0, 'cycle_delay': 0, 'min_interval': 0, 'max_interval': 1.5},
-            'fast': {'batch_size': 999, 'batch_delay': 0, 'cycle_delay': 5, 'min_interval': 0.5, 'max_interval': 2},
-            'medium': {'batch_size': 5, 'batch_delay': 2, 'cycle_delay': 15, 'min_interval': 2, 'max_interval': 4},
-            'slow': {'batch_size': 3, 'batch_delay': 5, 'cycle_delay': 30, 'min_interval': 5, 'max_interval': 8},
-            'custom': {'batch_size': int(get_setting('spam_batch_size', 6)), 'batch_delay': int(get_setting('spam_batch_delay', 3)), 'cycle_delay': int(get_setting('spam_cycle_wait', 30)), 'min_interval': int(get_setting('spam_min_interval', 3)), 'max_interval': int(get_setting('spam_max_interval', 6))}
-        }
-        config = speed_configs.get(speed, speed_configs['medium'])
-        flood_slow_mode = get_setting('flood_slow_mode', True)
-        spam_messages = account_spam_messages.get(acc_id, [get_setting('spam_message', '𝟭𝟬 𝗠𝗜𝗡 𝗩𝗖 ₹𝟰𝟱 𝗕𝗔𝗕𝗬😘')])
-        msg_index = 0
-        cycle_count = 0
-        error_count = 0
-        max_batch = min(config['batch_size'], len(groups))
-        while not account_stop_flags.get(acc_id, False):
-            if not group_spam_enabled:
-                await asyncio.sleep(3)
-                continue
-            if not account_spam_active.get(acc_id, True):
-                await asyncio.sleep(5)
-                continue
-            for group in groups[:max_batch]:
-                if account_stop_flags.get(acc_id, False) or not account_spam_active.get(acc_id, True): break
+            for aid, client in list(account_clients.items()):
                 try:
-                    emoji = get_random_emoji()
-                    message = f"{spam_messages[msg_index % len(spam_messages)]} {emoji}"
-                    await client.send_message(group, message)
-                    account_stats[acc_id]['spam_sent'] += 1
-                    error_count = 0
-                    msg_index += 1
-                except FloodWaitError as e:
-                    error_count += 1
-                    await asyncio.sleep(min(e.seconds, 30) if flood_slow_mode else e.seconds)
-                except Exception as e:
-                    error_count += 1
-                    error_str = str(e).upper()
-                    if 'FLOOD' in error_str and flood_slow_mode:
-                        await asyncio.sleep(5)
-                    elif 'AUTHKEY' in error_str or 'DEACTIVATED' in error_str:
-                        await send_logout_notification(acc, error_str[:50])
-                        asyncio.create_task(handle_banned(acc))
-                        return
-                if config['max_interval'] > 0:
-                    await asyncio.sleep(random.uniform(config['min_interval'], config['max_interval']))
-            if account_stop_flags.get(acc_id, False): break
-            if config['batch_delay'] > 0 and len(groups) > max_batch:
-                await asyncio.sleep(config['batch_delay'])
-            if error_count > 10:
-                await asyncio.sleep(60)
-                error_count = 0
-            cycle_count += 1
-            if cycle_count % 20 == 0 and not account_stop_flags.get(acc_id, False):
-                try:
-                    await client.disconnect()
-                    await asyncio.sleep(3)
-                    client = TelegramClient(StringSession(acc['session']), acc.get('api_id', DEFAULT_API_ID), acc.get('api_hash', DEFAULT_API_HASH), proxy=proxy, receive_updates=False)
-                    await client.start()
-                    groups = await get_user_groups(client)
-                    max_batch = min(config['batch_size'], len(groups))
-                except: pass
-            if config['cycle_delay'] > 0:
-                for _ in range(config['cycle_delay']):
-                    if account_stop_flags.get(acc_id, False): break
-                    await asyncio.sleep(1)
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        if 'AuthKey' in str(e) or 'DEACTIVATED' in str(e):
-            await send_logout_notification(acc, str(e)[:50])
-            asyncio.create_task(handle_banned(acc))
-    finally:
-        account_stats[acc_id]['spam_running'] = False
-        account_spam_active[acc_id] = False
-        try: await client.disconnect()
-        except: pass
-
-def stop_spam(acc_id=None):
-    if acc_id:
-        account_stop_flags[acc_id] = True
-        account_spam_active[acc_id] = False
-        if acc_id in account_spam_tasks and not account_spam_tasks[acc_id].done():
-            account_spam_tasks[acc_id].cancel()
-        account_stats[acc_id]['spam_running'] = False
-    else:
-        for acc in active_accounts: stop_spam(acc['id'])
-
-def start_spam(acc_id=None):
-    targets = [a for a in active_accounts if a['id'] == acc_id] if acc_id else active_accounts
-    for acc in targets:
-        stats = account_stats.get(acc['id'], {})
-        if not stats.get('spam_running', False):
-            account_spam_active[acc['id']] = True
-            account_stop_flags[acc['id']] = False
-            task = asyncio.create_task(spam_account(acc))
-            account_spam_tasks[acc['id']] = task
-          # ========== BOT UI ==========
-def main_keyboard():
-    ar_status = "🟢 ACTIVE" if auto_reply_enabled else "🔴 STOPPED"
-    gs_status = "🟢 ACTIVE" if group_spam_enabled else "🔴 STOPPED"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🤖 Auto Reply [{ar_status}]", callback_data="m_ar")],
-        [InlineKeyboardButton(f"📨 Group Spam [{gs_status}]", callback_data="m_gs")],
-        [InlineKeyboardButton(f"👥 Accounts 📋", callback_data="m_acc")],
-        [InlineKeyboardButton(f"⚙️ Settings 🔧", callback_data="m_set")],
-        [InlineKeyboardButton(f"📊 Status 📈", callback_data="m_stat")],
-        [InlineKeyboardButton(f"🛡️ Admin 👑", callback_data="m_adm")],
-        [InlineKeyboardButton(f"🔐 Hardening 🛡️", callback_data="m_harden")],
-        [InlineKeyboardButton(f"📡 Channel Backup 🔄", callback_data="m_channel")],
-        [InlineKeyboardButton(f"🧹 Auto Delete Timer 🕐", callback_data="m_autodel")],
-    ])
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID and user_id not in admins:
-        await update.message.reply_text("⛔ Unauthorized!")
-        return
+                    me = await client.get_me()
+                    if me:
+                        account_stats.setdefault(aid, {})['healthy'] = True
+                        account_stats[aid]['last_checked'] = datetime.now().isoformat()
+                    else:
+                        account_stats.setdefault(aid, {})['healthy'] = False
+                except:
+                    account_stats.setdefault(aid, {})['healthy'] = False
+            await asyncio.sleep(600)
+        except:
+            await asyncio.sleep(60)
+          # ====== BOT HANDLERS ======
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    add_customer(user.id)
     await update.message.reply_text(
-        "🔥 **কন্ট্রোল প্যানেল** 🔥\n\nনিচ থেকে অপশন সিলেক্ট করুন:",
-        parse_mode='Markdown', reply_markup=main_keyboard()
-          )
-  # ========== CALLBACK HANDLER ==========
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled
+        f"👋 *Welcome to HackerAI Pentest Bot, {user.first_name}!*\n\n"
+        "This bot helps you manage Telegram accounts for security testing.\n\n"
+        "📌 *Main Features:*\n"
+        "• Add and manage Telegram accounts\n"
+        "• One-click account hardening\n"
+        "• Auto-reply and mass messaging\n"
+        "• Account health monitoring\n"
+        "• Auto-delete message timer (1 day)\n\n"
+        "Use /menu to see the main menu.",
+        parse_mode='Markdown'
+    )
+    await show_main_menu(update, context)
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_main_menu(update, context)
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("📱 Manage Accounts", callback_data='m_acc')],
+        [InlineKeyboardButton("🔐 Account Hardening", callback_data='m_harden')],
+        [InlineKeyboardButton("🤖 Auto Reply", callback_data='m_ar')],
+        [InlineKeyboardButton("📨 Group Spam", callback_data='m_gs')],
+        [InlineKeyboardButton("📡 Channel Backup", callback_data='m_channel')],
+        [InlineKeyboardButton("📊 Status & Stats", callback_data='m_stat')],
+        [InlineKeyboardButton("⏰ Auto-Delete Timer", callback_data='auto_delete_menu')],
+        [InlineKeyboardButton("⚙️ Settings", callback_data='m_set')],
+        [InlineKeyboardButton("🛡️ Admin Panel", callback_data='m_adm')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    text = "🤖 *HackerAI Pentest Bot - Main Menu*\n\nSelect an option below:"
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+# ====== BUTTON CALLBACK HANDLER ======
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
     data = query.data
+    user_id = update.effective_user.id
     
-    if user_id != OWNER_ID and user_id not in admins:
-        await query.edit_message_text("⛔ Access Denied!")
+    if user_id != OWNER_ID and user_id not in ADMIN_IDS:
+        await query.edit_message_text("❌ You are not authorized to use this bot.")
         return
+
+    # ====== MAIN MENU ======
+    if data == "main" or data == "back_to_menu":
+        await show_main_menu(update, context)
     
-    if data == "main":
-        await query.edit_message_text(
-            "🔥 **কন্ট্রোল প্যানেল** 🔥\n\nনিচ থেকে অপশন সিলেক্ট করুন:",
-            parse_mode='Markdown', reply_markup=main_keyboard()
+    # ====== AUTO-DELETE TIMER MENU ======
+    elif data == "auto_delete_menu":
+        ad_data = load_auto_delete_data()
+        enabled = ad_data.get("enabled", False)
+        days = ad_data.get("days", 1)
+        chats_count = len(ad_data.get("chats", {}))
+        deleted = ad_data.get("deleted_count", 0)
+        
+        status = "✅ চালু" if enabled else "❌ বন্ধ"
+        txt = (
+            f"⏰ **অটো-ডিলিট টাইমার**\n\n"
+            f"স্ট্যাটাস: {status}\n"
+            f"ডিলিট হবে: {days} দিন পর\n"
+            f"ট্র্যাক করা চ্যাট: {chats_count} টি\n"
+            f"ইতিমধ্যে ডিলিট: {deleted} টি\n\n"
+            f"🔹 চালু থাকলে সব আউটগোয়িং মেসেজ {days} দিন পর অটো ডিলিট হবে\n"
+            f"🔹 প্রতি ৩০ মিনিট পর চেক করে\n"
+            f"🔹 শুধু তোমার সেন্ট মেসেজ ডিলিট হবে"
         )
-    
-    # ===== ★★ NEW: AUTO DELETE TIMER SECTION ★★ =====
-    elif data == "m_autodel":
-        timer_data = load_auto_delete_timers()
-        enabled = get_setting('auto_delete_timer_enabled', True)
-        days = get_setting('auto_delete_timer_days', 1)
-        deleted = timer_data.get('deleted_messages', 0)
-        active_chats = sum(len(chats) for chats in timer_data.get('active_timers', {}).values())
-        
-        txt = f"🧹 **অটো ডিলিট টাইমার** 🧹\n\n"
-        txt += f"═══════════════════════\n"
-        txt += f"স্ট্যাটাস: {'🟢 চালু' if enabled else '🔴 বন্ধ'}\n"
-        txt += f"ডিলিট interval: {days} দিন\n"
-        txt += f"মোট ডিলিট: {deleted}টি\n"
-        txt += f"একটিভ টাইমার: {active_chats}টি\n"
-        txt += f"═══════════════════════\n\n"
-        txt += "প্রতি ঘন্টায় চেক করে\n"
-        txt += f"{days} দিন পর পুরনো মেসেজ অটো ডিলিট! 🔥"
-        
         kb = [
-            [InlineKeyboardButton(f"{'🟢 চালু' if enabled else '🔴 বন্ধ'} টাইমার", callback_data="autodel_toggle")],
-            [InlineKeyboardButton("⏱️ সময় সেট (দিন)", callback_data="autodel_days")],
-            [InlineKeyboardButton("📊 স্ট্যাটাস দেখো", callback_data="autodel_stats")],
+            [InlineKeyboardButton(f"{'⏸️ বন্ধ করো' if enabled else '▶️ চালু করো'}", callback_data="auto_delete_toggle")],
+            [InlineKeyboardButton("📅 ডে সেট করো", callback_data="auto_delete_days_menu")],
+            [InlineKeyboardButton("📋 ট্র্যাক করা চ্যাট", callback_data="auto_delete_list")],
+            [InlineKeyboardButton("➕ চ্যাট যোগ করো", callback_data="auto_delete_add_ask")],
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data == "autodel_toggle":
-        cur = get_setting('auto_delete_timer_enabled', True)
-        set_setting('auto_delete_timer_enabled', not cur)
-        status = "🟢 চালু" if not cur else "🔴 বন্ধ"
-        await query.edit_message_text(f"✅ অটো ডিলিট টাইমার {status} হয়েছে!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_autodel")]]))
-    
-    elif data == "autodel_days":
-        context.user_data['await'] = 'autodel_days'
-        cur = get_setting('auto_delete_timer_days', 1)
+        
+    elif data == "auto_delete_toggle":
+        ad_data = load_auto_delete_data()
+        ad_data["enabled"] = not ad_data.get("enabled", False)
+        save_auto_delete_data(ad_data)
+        status = "চালু ✅" if ad_data["enabled"] else "বন্ধ ❌"
+        await query.edit_message_text(f"⏰ অটো-ডিলিট টাইমার এখন {status}!", parse_mode='Markdown')
+        await asyncio.sleep(1)
+        await button_handler(update, context)  # Recall with same update
+        
+    elif data == "auto_delete_days_menu":
+        kb = [
+            [InlineKeyboardButton("1 দিন", callback_data="auto_delete_days_1")],
+            [InlineKeyboardButton("3 দিন", callback_data="auto_delete_days_3")],
+            [InlineKeyboardButton("7 দিন", callback_data="auto_delete_days_7")],
+            [InlineKeyboardButton("14 দিন", callback_data="auto_delete_days_14")],
+            [InlineKeyboardButton("30 দিন", callback_data="auto_delete_days_30")],
+            [InlineKeyboardButton("🔙 পিছনে", callback_data="auto_delete_menu")]
+        ]
         await query.edit_message_text(
-            f"⏱️ **ডিলিট interval দিন সংখ্যা লিখুন:**\n\n"
-            f"বর্তমান: {cur} দিন\n\n"
-            f"যেমন: `1` (প্রতি ১ দিন পর), `3` (প্রতি ৩ দিন পর)",
+            "📅 **দিন সেট করো:**\n\nকত দিন পর মেসেজ অটো ডিলিট হবে?",
+            parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb)
+        )
+        
+    elif data.startswith("auto_delete_days_"):
+        days = int(data.split("_")[-1])
+        ad_data = load_auto_delete_data()
+        ad_data["days"] = days
+        save_auto_delete_data(ad_data)
+        await query.edit_message_text(f"✅ {days} দিন সেট করা হয়েছে!", parse_mode='Markdown')
+        await asyncio.sleep(1)
+        await button_handler(update, context)
+        
+    elif data == "auto_delete_list":
+        ad_data = load_auto_delete_data()
+        chats = ad_data.get("chats", {})
+        if not chats:
+            txt = "📋 কোনো গ্রুপ ট্র্যাক করা হচ্ছে না।"
+        else:
+            txt = f"📋 **ট্র্যাক করা গ্রুপ ({len(chats)})**\n\n"
+            for i, (key, info) in enumerate(list(chats.items())[:15], 1):
+                title = info.get("chat_title", "?")[:20]
+                phone = info.get("phone", "?")[-8:]
+                txt += f"{i}. {title} (`{phone}`)\n"
+            if len(chats) > 15:
+                txt += f"\n...আরও {len(chats)-15} টি"
+        await query.edit_message_text(txt, parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="auto_delete_menu")]]))
+        
+    elif data == "auto_delete_add_ask":
+        context.user_data['await'] = 'autodel_add_chat'
+        await query.edit_message_text(
+            "📝 **যে গ্রুপ/চ্যাটে ট্র্যাকিং যোগ করতে চাও, সেই গ্রুপের আইডি দিন:**\n\n"
+            "ফরম্যাট: `-1001234567890`\n\n"
+            "অথবা গ্রুপ থেকে একটা মেসেজ ফরোয়ার্ড করো।",
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_autodel")]]))
-    
-    elif data == "autodel_stats":
-        timer_data = load_auto_delete_timers()
-        txt = "📊 **অটো ডিলিট স্ট্যাটাস** 📊\n\n"
-        txt += f"মোট ডিলিট: {timer_data.get('deleted_messages', 0)}টি\n"
-        txt += f"শেষ ক্লিনআপ: {timer_data.get('last_cleanup', '❌ এখনো হয়নি')[:19]}\n\n"
-        
-        active_chats = 0
-        for acc_id, chats in timer_data.get('active_timers', {}).items():
-            for chat_id, info in chats.items():
-                reg_time = info.get('registered_at', '?')[:16]
-                active_chats += 1
-                if active_chats <= 5:  # শুধু প্রথম 5টা দেখাবে
-                    txt += f"• {info.get('chat_title','?')} → {reg_time}\n"
-        
-        txt += f"\nএকটিভ টাইমার: {active_chats}টি"
-        
-        await query.edit_message_text(txt[:4000], parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_autodel")]]))
-    
-    # ===== ★★ NEW: CHANNEL BACKUP SECTION ★★ =====
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="auto_delete_menu")]])
+        )
+
+    # ====== ACCOUNT HARDENING ======
+    elif data == "m_harden":
+        wait_24h = get_setting('harden_24h_wait', False)
+        txt = "🔐 **Account Hardening** 🔐\n\n"
+        txt += "═══════════════════════\n"
+        txt += "✅ নাম, বায়ো চেঞ্জ\n"
+        txt += "✅ ইমিডিয়েট ডিভাইস রিমুভ\n"
+        txt += "✅ প্রাইভেসি সেটিংস শক্ত করা\n"
+        txt += "✅ সব চ্যাট/গ্রুপ/চ্যানেল লিভ\n"
+        txt += "✅ গ্রুপ অটো জয়েন\n"
+        txt += "✅ ১ দিন পর অটো ডিলিট টাইমার\n"
+        txt += "═══════════════════════\n"
+        txt += "\n❗ **সবকিছু ১ ক্লিকেই!**\n"
+        kb = [
+            [InlineKeyboardButton("⚡ 1 Click Full Hardening", callback_data="harden_all")],
+            [InlineKeyboardButton("✏️ Set New Name", callback_data="harden_name")],
+            [InlineKeyboardButton("✏️ Set New Bio", callback_data="harden_bio")],
+            [InlineKeyboardButton("📱 View Devices", callback_data="harden_devices")],
+            [InlineKeyboardButton("🔑 Auto Join Links", callback_data="harden_links")],
+            [InlineKeyboardButton("📋 Hardening History", callback_data="harden_history")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
+        ]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "harden_all":
+        if not active_accounts:
+            await query.edit_message_text("❌ কোনো একটিভ অ্যাকাউন্ট নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
+            return
+        kb = [[InlineKeyboardButton(f"🛡️ {a.get('name','?')[:15]} 📱{a.get('phone','N/A')[-4:]}", callback_data=f"hdn_{a['id']}")] for a in active_accounts]
+        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")])
+        await query.edit_message_text("**কোন অ্যাকাউন্ট হার্ডেন করবেন?**\n\n⚠️ ১ ক্লিকেই সব পরিবর্তন!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data.startswith("hdn_"):
+        aid = data.split('_')[1]
+        acc = find_account(aid)
+        if not acc:
+            await query.edit_message_text("❌ অ্যাকাউন্ট খুঁজে পাইনি!")
+            return
+        await query.edit_message_text(f"⏳ **হার্ডেনিং শুরু...**\nঅ্যাকাউন্ট: {acc.get('name','?')}\nঅপেক্ষা করুন...", parse_mode='Markdown')
+        result = await harden_account_one_click(acc)
+        await query.edit_message_text(f"**রেজাল্ট:**\n\n{result}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
+
+    elif data == "harden_name":
+        context.user_data['await'] = 'harden_name'
+        cur = get_setting('new_account_name', '')
+        await query.edit_message_text(f"✏️ **নতুন নাম লিখুন:**\nবর্তমান: {cur or 'সেট নেই'}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
+
+    elif data == "harden_bio":
+        context.user_data['await'] = 'harden_bio'
+        cur = get_setting('new_account_bio', '')
+        await query.edit_message_text(f"✏️ **নতুন বায়ো লিখুন:**\nবর্তমান: {cur or 'সেট নেই'}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
+
+    elif data == "harden_devices":
+        if not active_accounts:
+            await query.edit_message_text("❌ কোনো একটিভ অ্যাকাউন্ট নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
+            return
+        kb = [[InlineKeyboardButton(f"📱 {a.get('name','?')[:15]}", callback_data=f"hdv_{a['id']}")] for a in active_accounts[:10]]
+        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")])
+        await query.edit_message_text("**কোন অ্যাকাউন্টের ডিভাইস দেখবেন?**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data.startswith("hdv_"):
+        aid = data.split('_')[1]
+        info = await get_device_login_info(aid)
+        await query.edit_message_text(f"📱 **Device Info:**\n\n{info[:3500]}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="harden_devices"), InlineKeyboardButton("🔄 Refresh", callback_data=f"hdv_{aid}")]]))
+
+    elif data == "harden_links":
+        links = load_autojoin_links()
+        txt = "🔑 **Auto Join Links**\n\nযে সব লিংকে অটো জয়েন হবে:\n\n"
+        if links:
+            for i, link in enumerate(links, 1):
+                txt += f"{i}. {link[:40]}...\n"
+        else:
+            txt += "কোনো লিংক নেই। /new_join_link কমান্ড ব্যবহার করুন।\n"
+        kb = [
+            [InlineKeyboardButton("➕ Add Link", callback_data="harden_link_add")],
+            [InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]
+        ]
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "harden_link_add":
+        context.user_data['await'] = 'harden_link_add'
+        await query.edit_message_text("🔗 **গ্রুপ লিংক পাঠান:**\nযেমন: https://t.me/yourgroup", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="harden_links")]]))
+
+    elif data == "harden_history":
+        txt = "📋 **Hardening History**\n\n"
+        has_data = False
+        for acc in active_accounts:
+            tasks = load_harden_tasks().get(acc['id'], [])
+            if tasks:
+                has_data = True
+                txt += f"👤 {acc.get('name','?')}\n"
+                for t in tasks[-5:]:
+                    status = "✅" if t['status'] == 'completed' else "⏳"
+                    txt += f"  {status} {t['type']} - {t['created_at'][:16]}\n"
+                txt += "\n"
+        if not has_data:
+            txt += "কোনো ডাটা নেই। 1 Click Hardening ব্যবহার করুন।"
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
+
+    # ====== ACCOUNT MANAGEMENT ======
+    elif data == "m_acc":
+        ma = len(get_main_accounts())
+        ba = len(get_backup_accounts())
+        act = len(active_accounts)
+        txt = f"👥 **Account**\nMain: {ma} | Backup: {ba} | Active: {act}"
+        kb = [
+            [InlineKeyboardButton("📱 Phone + OTP", callback_data="ac_ph")],
+            [InlineKeyboardButton("🔑 Session String", callback_data="ac_ss")],
+            [InlineKeyboardButton("🗑️ Delete", callback_data="ac_del")],
+            [InlineKeyboardButton("💾 Backup Mgmt", callback_data="ac_bk")],
+            [InlineKeyboardButton("📋 List All", callback_data="ac_ls")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
+        ]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "ac_ph":
+        context.user_data['await'] = 'ac_ph'
+        await query.edit_message_text("📱 **ফোন নম্বর দিন:**\n\nফরম্যাট: `+8801XXXXXXXXX`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
+
+    elif data == "ac_ss":
+        context.user_data['await'] = 'ac_ss'
+        await query.edit_message_text("🔑 **Session String পেস্ট করুন:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
+
+    elif data == "ac_del":
+        all_a = get_all_accounts()
+        if not all_a:
+            await query.edit_message_text("❌ কোনো অ্যাকাউন্ট নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
+            return
+        kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} | {a.get('phone','N/A')}", callback_data=f"acd_{a['id']}")] for a in all_a]
+        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")])
+        await query.edit_message_text("🗑️ **ডিলিট করার জন্য অ্যাকাউন্ট সিলেক্ট করুন:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data.startswith("acd_"):
+        aid = data.split('_', 1)[1]
+        a = find_account(aid)
+        name = a.get('name', '?') if a else '?'
+        if aid in account_keepalive_tasks:
+            if not account_keepalive_tasks[aid].done():
+                account_keepalive_tasks[aid].cancel()
+                try: await account_keepalive_tasks[aid]
+                except: pass
+            del account_keepalive_tasks[aid]
+        if aid in account_spam_tasks:
+            if not account_spam_tasks[aid].done():
+                account_spam_tasks[aid].cancel()
+                try: await account_spam_tasks[aid]
+                except: pass
+            del account_spam_tasks[aid]
+        if aid in account_clients:
+            try: await account_clients[aid].disconnect()
+            except: pass
+            del account_clients[aid]
+        active_accounts[:] = [x for x in active_accounts if x['id'] != aid]
+        for d in [account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active]:
+            if aid in d: del d[aid]
+        remove_account_data(aid)
+        await query.edit_message_text(f"✅ **{name}** permanently deleted!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
+
+    elif data == "ac_bk":
+        ba = get_backup_accounts()
+        txt = f"💾 **ব্যাকআপ অ্যাকাউন্ট**\nমোট: {len(ba)}\n\n"
+        for i, a in enumerate(ba, 1):
+            txt += f"{i}. {a.get('name', '?')} ({a.get('phone', 'N/A')})\n"
+        kb = [
+            [InlineKeyboardButton("➕ ব্যাকআপ যোগ করো", callback_data="ac_bk_add")],
+            [InlineKeyboardButton("🗑️ ব্যাকআপ রিমুভ", callback_data="ac_bk_del")],
+            [InlineKeyboardButton("➡️ ব্যাকআপ → রানিং (1 Click)", callback_data="ac_bk_to_run")],
+            [InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]
+        ]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "ac_bk_add":
+        context.user_data['await'] = 'ac_bk_ss'
+        await query.edit_message_text("🔑 **ব্যাকআপ Session String পেস্ট করুন:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
+
+    elif data == "ac_bk_del":
+        ba = get_backup_accounts()
+        if not ba:
+            await query.edit_message_text("❌ কোনো ব্যাকআপ নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
+            return
+        kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"acbkd_{a['id']}")] for a in ba]
+        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")])
+        await query.edit_message_text("🗑️ **রিমুভ করবেন?**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "ac_bk_to_run":
+        ba = get_backup_accounts()
+        if not ba:
+            await query.edit_message_text("❌ কোনো ব্যাকআপ নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
+            return
+        kb = [[InlineKeyboardButton(f"➡️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"b2r_{a['id']}")] for a in ba]
+        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")])
+        await query.edit_message_text("**কোন ব্যাকআপ রানিং করবেন?**\n\nঅটো রিপ্লাই + স্প্যাম শুরু হবে!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data.startswith("b2r_"):
+        bid = data.split('_')[1]
+        backup_acc = None
+        for a in get_backup_accounts():
+            if a['id'] == bid:
+                backup_acc = a
+                break
+        if not backup_acc:
+            await query.edit_message_text("❌ অ্যাকাউন্ট খুঁজে পাইনি!")
+            return
+        # Process backup to running
+        backup_acc['is_backup'] = False
+        add_account_data(backup_acc)
+        remove_account_data(bid)
+        try:
+            nc = await start_account(backup_acc)
+            if nc:
+                active_accounts.append(backup_acc)
+                account_clients[backup_acc['id']] = nc
+                account_stats[backup_acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                account_stop_flags[backup_acc['id']] = False
+                await query.edit_message_text(f"✅ **{backup_acc.get('name','?')}** এখন রানিং!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
+        except Exception as e:
+            await query.edit_message_text(f"❌ Failed: {str(e)[:100]}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
+
+    elif data.startswith("acbkd_"):
+        bid = data.split('_')[1]
+        remove_account_data(bid)
+        await query.edit_message_text("✅ ব্যাকআপ রিমুভ হয়েছে!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
+
+    elif data == "ac_ls":
+        all_a = get_all_accounts()
+        if not all_a:
+            await query.edit_message_text("❌ কোনো অ্যাকাউন্ট নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
+            return
+        txt = f"📋 **সব অ্যাকাউন্ট** ({len(all_a)})\n\n"
+        for i, a in enumerate(all_a, 1):
+            n = a.get('name', '?')
+            p = a.get('phone', 'N/A')
+            tp = "MAIN" if not a.get('is_backup') else "BKP"
+            st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
+            txt += f"{st} {tp} {i}. {n} 📱{p}\n"
+        await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
+
+    # ====== CHANNEL BACKUP ======
     elif data == "m_channel":
         ch_data = load_channel_backup()
         main_chs = ch_data.get('main_channels', [])
@@ -1627,94 +1034,66 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-      # ===== CHANNEL BACKUP HANDLERS (Continued) =====
+
     elif data == "ch_add_main":
         context.user_data['await'] = 'ch_add_main'
-        await query.edit_message_text(
-            "📡 **মূল চ্যানেলের আইডি বা ইউজারনেম দিন:**\n\n"
-            "যেমন: `@yourchannel` অথবা `-1001234567890`\n\n"
-            "⚠️ নোট: অ্যাকাউন্ট অবশ্যই চ্যানেলের মেম্বার হতে হবে!",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]])
-        )
+        await query.edit_message_text("📡 **মূল চ্যানেলের আইডি বা ইউজারনেম দিন:**\n\nযেমন: `@yourchannel` অথবা `-1001234567890`\n\n⚠️ নোট: অ্যাকাউন্ট অবশ্যই চ্যানেলের মেম্বার হতে হবে!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
 
     elif data == "ch_add_backup":
         context.user_data['await'] = 'ch_add_backup'
-        await query.edit_message_text(
-            "📡 **ব্যাকআপ চ্যানেলের আইডি বা ইউজারনেম দিন:**\n\n"
-            "যেমন: `@backupchannel` অথবা `-1001234567890`\n\n"
-            "যখন মূল চ্যানেল থেকে কিক খাবে, অটো এই চ্যানেলে জয়েন হবে!",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]])
-        )
+        await query.edit_message_text("📡 **ব্যাকআপ চ্যানেলের আইডি বা ইউজারনেম দিন:**\n\nযেমন: `@backupchannel` অথবা `-1001234567890`\n\nযখন মূল চ্যানেল থেকে কিক খাবে, অটো এই চ্যানেলে জয়েন হবে!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
 
     elif data == "ch_list":
         ch_data = load_channel_backup()
         txt = "📋 **চ্যানেল লিস্ট:**\n\n"
-        
         txt += "═══ **মূল চ্যানেল:** ═══\n"
         if ch_data['main_channels']:
             for i, ch in enumerate(ch_data['main_channels'], 1):
                 txt += f"{i}. {ch.get('title','?')} (`{ch.get('id','?')}`)\n"
         else:
             txt += "❌ কোনো মূল চ্যানেল নেই\n"
-        
         txt += "\n═══ **ব্যাকআপ চ্যানেল:** ═══\n"
         if ch_data['backup_channels']:
             for i, ch in enumerate(ch_data['backup_channels'], 1):
                 txt += f"{i}. {ch.get('title','?')} (`{ch.get('id','?')}`)\n"
         else:
             txt += "❌ কোনো ব্যাকআপ চ্যানেল নেই\n"
-        
         txt += f"\n**একটিভ চ্যানেল:** {ch_data['active_channel'].get('title','❌ None') if ch_data['active_channel'] else '❌ None'}"
-        
-        await query.edit_message_text(txt[:4000], parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
 
     elif data == "ch_remove":
         ch_data = load_channel_backup()
         all_chs = ch_data['main_channels'] + ch_data['backup_channels']
-        
         if not all_chs:
-            await query.edit_message_text("❌ কোনো চ্যানেল নেই!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
+            await query.edit_message_text("❌ কোনো চ্যানেল নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
             return
-        
         kb = []
         for ch in all_chs:
             label = f"🗑️ {ch.get('title','?')[:20]}"
             kb.append([InlineKeyboardButton(label, callback_data=f"chrm_{ch['id']}_{ch.get('type','main')}")])
         kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")])
-        
         await query.edit_message_text("🗑️ **কোন চ্যানেল রিমুভ করবেন?**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data.startswith("chrm_"):
         parts = data.split('_')
         ch_id = parts[1]
         ch_type = parts[2]
-        
         data_ch = load_channel_backup()
         if ch_type == 'main':
             data_ch['main_channels'] = [ch for ch in data_ch['main_channels'] if str(ch['id']) != ch_id]
         else:
             data_ch['backup_channels'] = [ch for ch in data_ch['backup_channels'] if str(ch['id']) != ch_id]
-        
         if data_ch['active_channel'] and str(data_ch['active_channel']['id']) == ch_id:
             data_ch['active_channel'] = None
-        
         save_channel_backup(data_ch)
-        
-        await query.edit_message_text("✅ চ্যানেল রিমুভ হয়েছে!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
+        await query.edit_message_text("✅ চ্যানেল রিমুভ হয়েছে!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
 
     elif data == "ch_toggle":
         cur = get_setting('channel_backup_enabled', True)
         set_setting('channel_backup_enabled', not cur)
         status = "🟢 চালু" if not cur else "🔴 বন্ধ"
-        await query.edit_message_text(f"✅ চ্যানেল ব্যাকআপ {status} হয়েছে!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
-
-    # ===== AUTO REPLY SECTION =====
+        await query.edit_message_text(f"✅ চ্যানেল ব্যাকআপ {status} হয়েছে!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
+      # ====== AUTO REPLY ======
     elif data == "m_ar":
         running = sum(1 for a in active_accounts if a.get('enabled', True))
         total = len(active_accounts)
@@ -1734,15 +1113,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "ar_start":
+        global auto_reply_enabled
         auto_reply_enabled = True
-        await query.edit_message_text("✅ **অটো রিপ্লাই চালু!**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
+        await query.edit_message_text("✅ **অটো রিপ্লাই চালু!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
     elif data == "ar_stop":
+        global auto_reply_enabled
         auto_reply_enabled = False
-        await query.edit_message_text("⏹️ **অটো রিপ্লাই বন্ধ!**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
-    
+        await query.edit_message_text("⏹️ **অটো রিপ্লাই বন্ধ!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
+
     elif data == "ar_welcome":
         enabled = get_setting('welcome_enabled', True)
         status = "🟢 চালু" if enabled else "🔴 বন্ধ"
@@ -1760,8 +1139,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ar_welcome_tog":
         cur = get_setting('welcome_enabled', True)
         set_setting('welcome_enabled', not cur)
-        # Re-render the welcome page
-        # We call handle_callback again with the parent data - better to just update
         enabled = not cur
         status = "🟢 চালু" if enabled else "🔴 বন্ধ"
         has_img = "✅ আছে" if WELCOME_IMAGE_FILE.exists() else "❌ নেই"
@@ -1777,18 +1154,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ar_welcome_edit":
         context.user_data['await'] = 'welcome_text'
-        await query.edit_message_text("✏️ নতুন টেক্সট ১ লিখুন:", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
+        await query.edit_message_text("✏️ নতুন টেক্সট ১ লিখুন:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
 
     elif data == "ar_welcome_edit2":
         context.user_data['await'] = 'welcome_text_2'
-        await query.edit_message_text("✏️ নতুন টেক্সট ২ লিখুন:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
+        await query.edit_message_text("✏️ নতুন টেক্সট ২ লিখুন:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
 
     elif data == "ar_welcome_img":
         context.user_data['await'] = 'welcome_image'
-        await query.edit_message_text("📷 ইমেজ পাঠান:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
+        await query.edit_message_text("📷 ইমেজ পাঠান:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
 
     elif data == "ar_blockphoto":
         enabled = get_setting('block_photo_enabled', True)
@@ -1836,8 +1210,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ar_typing_time":
         context.user_data['await'] = 'typing_time'
-        await query.edit_message_text(f"⏱️ Time (0-300s):\nCurrent: {get_setting('typing_duration', 240)}s",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_typing")]]))
+        await query.edit_message_text(f"⏱️ Time (0-300s):\nCurrent: {get_setting('typing_duration', 240)}s", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_typing")]]))
 
     elif data == "ar_waittime":
         current = int(get_setting('wait_time', 300))
@@ -1854,20 +1227,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         val = data.split("_")[1]
         if val == "custom":
             context.user_data['await'] = 'wait_time'
-            await query.edit_message_text(f"Enter seconds (0-600):\nCurrent: {get_setting('wait_time', 300)}s",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_waittime")]]))
+            await query.edit_message_text(f"Enter seconds (0-600):\nCurrent: {get_setting('wait_time', 300)}s", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_waittime")]]))
         else:
             set_setting('wait_time', int(val))
-            await query.edit_message_text(f"✅ {val}s!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_waittime")]]))
+            await query.edit_message_text(f"✅ {val}s!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_waittime")]]))
 
     elif data == "ar_ignore":
         context.user_data['await'] = 'ignore'
         cur = get_setting('ignored_messages', '')
         txt = "🚫 Ignore:\nএক লাইনে একটি\n\n"
         if cur: txt += f"Current:\n`{cur}`"
-        await query.edit_message_text(txt,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
     elif data == "ar_replies":
         replies = load_json(REPLIES_FILE, [])
@@ -1876,10 +1246,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for r in replies[-10:]:
                 txt += f"`{r['keyword'][:12]}` → {r['reply'][:20]}...\n"
         else: txt += "কিছু নেই। /add_reply ব্যবহার করুন।\n"
-        await query.edit_message_text(txt,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
-    # ===== GROUP SPAM =====
+    # ====== GROUP SPAM ======
     elif data == "m_gs":
         run = sum(1 for a in active_accounts if account_stats.get(a['id'], {}).get('spam_running', False))
         st = "🟢 ACTIVE" if group_spam_enabled else "🔴 STOPPED"
@@ -1895,16 +1264,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "gs_start":
+        global group_spam_enabled
         group_spam_enabled = True
-        start_spam()
-        await query.edit_message_text("✅ স্প্যাম চালু!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
+        await query.edit_message_text("✅ স্প্যাম চালু!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
     elif data == "gs_stop":
+        global group_spam_enabled
         group_spam_enabled = False
-        stop_spam()
-        await query.edit_message_text("⏹️ স্প্যাম বন্ধ!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
+        await query.edit_message_text("⏹️ স্প্যাম বন্ধ!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
     elif data == "gs_spd":
         cur = get_setting('spam_speed', 'medium')
@@ -1920,8 +1287,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ["gs_sf", "gs_fa", "gs_me", "gs_sl"]:
         m = {'gs_sf': 'super_fast', 'gs_fa': 'fast', 'gs_me': 'medium', 'gs_sl': 'slow'}
         set_setting('spam_speed', m[data])
-        await query.edit_message_text(f"✅ Speed: {m[data]}!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
+        await query.edit_message_text(f"✅ Speed: {m[data]}!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
     elif data == "gs_msg":
         msgs = load_spam_messages()
@@ -1939,8 +1305,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "gs_msg_add":
         context.user_data['await'] = 'gs_msg_add'
-        await query.edit_message_text("✏️ স্প্যাম মেসেজ পাঠান:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="gs_msg")]]))
+        await query.edit_message_text("✏️ স্প্যাম মেসেজ পাঠান:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="gs_msg")]]))
 
     elif data == "gs_st":
         txt = "📊 **Stats:**\n"
@@ -1948,154 +1313,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             s = account_stats.get(a['id'], {}).get('spam_sent', 0)
             r = "▶️" if account_stats.get(a['id'], {}).get('spam_running', False) else "⏹️"
             txt += f"{r} {a.get('name','?')[:10]}: {s}\n"
-        await query.edit_message_text(txt,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
-      # ===== ACCOUNTS =====
-    elif data == "m_acc":
-        ma = len(get_main_accounts())
-        ba = len(get_backup_accounts())
-        act = len(active_accounts)
-        txt = f"👥 **Account**\nMain: {ma} | Backup: {ba} | Active: {act}"
-        kb = [
-            [InlineKeyboardButton("📱 Phone + OTP", callback_data="ac_ph")],
-            [InlineKeyboardButton("🔑 Session String", callback_data="ac_ss")],
-            [InlineKeyboardButton("🗑️ Delete", callback_data="ac_del")],
-            [InlineKeyboardButton("💾 Backup Mgmt", callback_data="ac_bk")],
-            [InlineKeyboardButton("📋 List All", callback_data="ac_ls")],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data == "ac_ph":
-        context.user_data['await'] = 'ac_ph'
-        await query.edit_message_text("📱 **ফোন নম্বর দিন:**\n\nফরম্যাট: `+8801XXXXXXXXX`",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-    
-    elif data == "ac_ss":
-        context.user_data['await'] = 'ac_ss'
-        await query.edit_message_text("🔑 **Session String পেস্ট করুন:**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-    
-    elif data == "ac_del":
-        all_a = get_all_accounts()
-        if not all_a:
-            await query.edit_message_text("❌ কোনো অ্যাকাউন্ট নেই!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-            return
-        kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} | {a.get('phone','N/A')}", callback_data=f"acd_{a['id']}")] for a in all_a]
-        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")])
-        await query.edit_message_text("🗑️ **ডিলিট করার জন্য অ্যাকাউন্ট সিলেক্ট করুন:**",
-            parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data.startswith("acd_"):
-        aid = data.split('_', 1)[1]
-        a = find_account(aid)
-        name = a.get('name', '?') if a else '?'
-        
-        if aid in account_keepalive_tasks:
-            if not account_keepalive_tasks[aid].done():
-                account_keepalive_tasks[aid].cancel()
-                try: await account_keepalive_tasks[aid]
-                except: pass
-            del account_keepalive_tasks[aid]
-        if aid in account_spam_tasks:
-            if not account_spam_tasks[aid].done():
-                account_spam_tasks[aid].cancel()
-                try: await account_spam_tasks[aid]
-                except: pass
-            del account_spam_tasks[aid]
-        if aid in account_clients:
-            try: await account_clients[aid].disconnect()
-            except: pass
-            del account_clients[aid]
-        
-        active_accounts[:] = [x for x in active_accounts if x['id'] != aid]
-        for d in [account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active]:
-            if aid in d: del d[aid]
-        
-        remove_account_data(aid)
-        await query.edit_message_text(f"✅ **{name}** permanently deleted!",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-    
-    elif data == "ac_bk":
-        ba = get_backup_accounts()
-        txt = f"💾 **ব্যাকআপ অ্যাকাউন্ট**\nমোট: {len(ba)}\n\n"
-        for i, a in enumerate(ba, 1):
-            txt += f"{i}. {a.get('name', '?')} ({a.get('phone', 'N/A')})\n"
-        
-        kb = [
-            [InlineKeyboardButton("➕ ব্যাকআপ যোগ করো", callback_data="ac_bk_add")],
-            [InlineKeyboardButton("🗑️ ব্যাকআপ রিমুভ", callback_data="ac_bk_del")],
-            [InlineKeyboardButton("➡️ ব্যাকআপ → রানিং (1 Click)", callback_data="ac_bk_to_run")],
-            [InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data == "ac_bk_add":
-        context.user_data['await'] = 'ac_bk_ss'
-        await query.edit_message_text("🔑 **ব্যাকআপ Session String পেস্ট করুন:**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
-    
-    elif data == "ac_bk_del":
-        ba = get_backup_accounts()
-        if not ba:
-            await query.edit_message_text("❌ কোনো ব্যাকআপ নেই!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
-            return
-        kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"acbkd_{a['id']}")] for a in ba]
-        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")])
-        await query.edit_message_text("🗑️ **রিমুভ করবেন?**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data == "ac_bk_to_run":
-        ba = get_backup_accounts()
-        if not ba:
-            await query.edit_message_text("❌ কোনো ব্যাকআপ নেই!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
-            return
-        kb = [[InlineKeyboardButton(f"➡️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"b2r_{a['id']}")] for a in ba]
-        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")])
-        await query.edit_message_text("**কোন ব্যাকআপ রানিং করবেন?**\n\nঅটো রিপ্লাই + স্প্যাম শুরু হবে!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data.startswith("b2r_"):
-        bid = data.split('_')[1]
-        backup_acc = None
-        for a in get_backup_accounts():
-            if a['id'] == bid:
-                backup_acc = a
-                break
-        if not backup_acc:
-            await query.edit_message_text("❌ অ্যাকাউন্ট খুঁজে পাইনি!")
-            return
-        
-        success, msg = await add_backup_to_running(backup_acc)
-        await query.edit_message_text(msg,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
-    
-    elif data.startswith("acbkd_"):
-        bid = data.split('_')[1]
-        remove_account_data(bid)
-        await query.edit_message_text("✅ ব্যাকআপ রিমুভ হয়েছে!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
-    
-    elif data == "ac_ls":
-        all_a = get_all_accounts()
-        if not all_a:
-            await query.edit_message_text("❌ কোনো অ্যাকাউন্ট নেই!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-            return
-        txt = f"📋 **সব অ্যাকাউন্ট** ({len(all_a)})\n\n"
-        for i, a in enumerate(all_a, 1):
-            n = a.get('name', '?')
-            p = a.get('phone', 'N/A')
-            tp = "MAIN" if not a.get('is_backup') else "BKP"
-            st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
-            txt += f"{st} {tp} {i}. {n} 📱{p}\n"
-        await query.edit_message_text(txt[:4000],
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-    
-    # ===== SETTINGS =====
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
+
+    # ====== SETTINGS ======
     elif data == "m_set":
         bp = "🟢" if get_setting('block_photo_enabled', True) else "🔴"
         fs = "🟢" if get_setting('flood_slow_mode', True) else "🔴"
@@ -2151,6 +1371,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "st_ln":
+        global logout_notification_enabled
         logout_notification_enabled = not logout_notification_enabled
         bp = "🟢" if get_setting('block_photo_enabled', True) else "🔴"
         fs = "🟢" if get_setting('flood_slow_mode', True) else "🔴"
@@ -2180,45 +1401,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "st_upi":
         context.user_data['await'] = 'upi'
-        await query.edit_message_text("✏️ **UPI ID দিন:**\n`user@upi`",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="st_pay")]]))
+        await query.edit_message_text("✏️ **UPI ID দিন:**\n`user@upi`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="st_pay")]]))
 
     elif data == "st_paytm":
         context.user_data['await'] = 'paytm'
-        await query.edit_message_text("✏️ **PayTm নাম্বার দিন:**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="st_pay")]]))
+        await query.edit_message_text("✏️ **PayTm নাম্বার দিন:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="st_pay")]]))
 
     elif data == "st_qr":
         context.user_data['await'] = 'qr_code'
-        await query.edit_message_text("📷 **QR Code ইমেজ পাঠান:**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_set")]]))
+        await query.edit_message_text("📷 **QR Code ইমেজ পাঠান:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_set")]]))
 
-    # ===== STATS =====
+    # ====== STATUS ======
     elif data == "m_stat":
         ar = "🟢" if auto_reply_enabled else "🔴"
         gs = "🟢" if group_spam_enabled else "🔴"
         ttl_auto = sum(account_stats.get(a['id'], {}).get('auto_sent', 0) for a in active_accounts)
         ttl_spam = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
         spm_act = sum(1 for a in active_accounts if account_stats.get(a['id'], {}).get('spam_running', False))
-        
-        # Auto delete stats
-        timer_data = load_auto_delete_timers()
-        deleted = timer_data.get('deleted_messages', 0)
-        
-        txt = f"📊 **স্ট্যাটাস**\n\n"
-        txt += f"🤖 Auto Reply: {ar}\n"
-        txt += f"📨 Spam: {gs}\n"
-        txt += f"👤 Active: {len(active_accounts)}\n"
-        txt += f"📨 Spamming: {spm_act}\n"
-        txt += f"💬 Auto Sent: {ttl_auto}\n"
-        txt += f"📬 Spam Sent: {ttl_spam}\n"
-        txt += f"👥 Customers: {len(customer_count)}\n"
-        txt += f"🧹 Auto Deleted: {deleted} messages"
-        await query.edit_message_text(txt, parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="m_stat"), InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
+        ad_data = load_auto_delete_data()
+        deleted = ad_data.get('deleted_count', 0)
+        txt = f"📊 **স্ট্যাটাস**\n\n🤖 Auto Reply: {ar}\n📨 Spam: {gs}\n👤 Active: {len(active_accounts)}\n📨 Spamming: {spm_act}\n💬 Auto Sent: {ttl_auto}\n📬 Spam Sent: {ttl_spam}\n👥 Customers: {len(customer_count)}\n🧹 Auto Deleted: {deleted} messages"
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="m_stat"), InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
 
-    # ===== ADMIN =====
+    # ====== ADMIN PANEL ======
     elif data == "m_adm":
         txt = "🛡️ **Admin Panel**"
         kb = [
@@ -2231,232 +1436,148 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ad_bc":
         context.user_data['await'] = 'broadcast'
-        await query.edit_message_text("📢 **ব্রডকাস্ট মেসেজ লিখুন:**\n\nসব কাস্টমারকে পাঠানো হবে!",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_adm")]]))
+        await query.edit_message_text("📢 **ব্রডকাস্ট মেসেজ লিখুন:**\n\nসব কাস্টমারকে পাঠানো হবে!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_adm")]]))
 
     elif data == "ad_lg":
-        log_path = Path(__file__).parent / "bot.log"
+        log_path = Path('bot.log')
         if log_path.exists():
             with open(log_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()[-20:]
             txt = "📄 **Last 20 Logs**\n\n" + "".join(lines[-500:])
         else:
             txt = "📄 No log file found."
-        await query.edit_message_text(txt[:4000],
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_adm")]]))
+        await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_adm")]]))
 
     elif data == "ad_rt":
         await query.edit_message_text("🔄 **Restarting...**")
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
-    # ===== HARDENING =====
-    elif data == "m_harden":
-        txt = "🔐 **Account Hardening** 🔐\n\n"
-        txt += "═══════════════════════\n"
-        txt += "✅ নাম, বায়ো চেঞ্জ\n"
-        txt += "✅ অন্যান্য ডিভাইস লগআউট (ইমিডিয়েট)\n"
-        txt += "✅ ২FA সেট (জিমেইল ছাড়া)\n"
-        txt += "✅ সব চ্যাট/গ্রুপ/চ্যানেল লিভ\n"
-        txt += "✅ গ্রুপ অটো জয়েন\n"
-        txt += "✅ ১ দিন পর অটো ডিলিট টাইমার\n"
-        txt += "═══════════════════════\n"
-        txt += "\n❗ **সবকিছু ১ ক্লিকেই!**\n"
-        txt += "\n⚠️ ২৪ ঘন্টা ওয়েট রিমুভ করা হয়েছে\n"
-        txt += "✅ এখন সব ডিভাইস ইমিডিয়েটলি রিমুভ হবে"
-        
-        kb = [
-            [InlineKeyboardButton("⚡ 1 Click Full Hardening", callback_data="harden_all")],
-            [InlineKeyboardButton("✏️ Set New Name", callback_data="harden_name")],
-            [InlineKeyboardButton("✏️ Set New Bio", callback_data="harden_bio")],
-            [InlineKeyboardButton("📱 View Devices", callback_data="harden_devices")],
-            [InlineKeyboardButton("🔑 Auto Join Links", callback_data="harden_links")],
-            [InlineKeyboardButton("📋 Hardening History", callback_data="harden_history")],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data == "harden_all":
-        if not active_accounts:
-            await query.edit_message_text("❌ কোনো একটিভ অ্যাকাউন্ট নেই!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
-            return
-        
-        kb = [[InlineKeyboardButton(f"🛡️ {a.get('name','?')[:15]} 📱{a.get('phone','N/A')[-4:]}", callback_data=f"hdn_{a['id']}")] for a in active_accounts]
-        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")])
-        await query.edit_message_text("**কোন অ্যাকাউন্ট হার্ডেন করবেন?**\n\n⚠️ ১ ক্লিকেই সব পরিবর্তন!\n✅ ২৪ ঘন্টা ওয়েট রিমুভ - এখনই ডিভাইস রিমুভ হবে!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data.startswith("hdn_"):
-        aid = data.split('_')[1]
-        acc = find_account(aid)
-        if not acc:
-            await query.edit_message_text("❌ অ্যাকাউন্ট খুঁজে পাইনি!")
-            return
-        
-        await query.edit_message_text(f"⏳ **হার্ডেনিং শুরু...**\nঅ্যাকাউন্ট: {acc.get('name','?')}\nঅপেক্ষা করুন...\n✅ ইমিডিয়েট ডিভাইস রিমুভ!", parse_mode='Markdown')
-        result = await harden_account_one_click(acc)
-        await query.edit_message_text(f"**রেজাল্ট:**\n\n{result}",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
-    
-    elif data == "harden_name":
-        context.user_data['await'] = 'harden_name'
-        cur = get_setting('new_account_name', '')
-        await query.edit_message_text(f"✏️ **নতুন নাম লিখুন:**\nবর্তমান: {cur or 'সেট নেই'}",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
-    
-    elif data == "harden_bio":
-        context.user_data['await'] = 'harden_bio'
-        cur = get_setting('new_account_bio', '')
-        await query.edit_message_text(f"✏️ **নতুন বায়ো লিখুন:**\nবর্তমান: {cur or 'সেট নেই'}",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
-    
-    elif data == "harden_devices":
-        if not active_accounts:
-            await query.edit_message_text("❌ কোনো একটিভ অ্যাকাউন্ট নেই!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
-            return
-        kb = [[InlineKeyboardButton(f"📱 {a.get('name','?')[:15]}", callback_data=f"hdv_{a['id']}")] for a in active_accounts[:10]]
-        kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")])
-        await query.edit_message_text("**কোন অ্যাকাউন্টের ডিভাইস দেখবেন?**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data.startswith("hdv_"):
-        aid = data.split('_')[1]
-        info = await get_device_login_info(aid)
-        await query.edit_message_text(f"📱 **Device Info:**\n\n{info[:3500]}",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="harden_devices"), InlineKeyboardButton("🔄 Refresh", callback_data=f"hdv_{aid}")]]))
-    
-    elif data == "harden_links":
-        links = load_autojoin_links()
-        txt = "🔑 **Auto Join Links**\n\nযে সব লিংকে অটো জয়েন হবে:\n\n"
-        if links:
-            for i, link in enumerate(links, 1):
-                txt += f"{i}. {link[:40]}...\n"
-        else:
-            txt += "কোনো লিংক নেই।\n"
-        txt += "\n/new_join_link কমান্ড ব্যবহার করুন।"
-        kb = [
-            [InlineKeyboardButton("➕ Add Link", callback_data="harden_link_add")],
-            [InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]
-        ]
-        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data == "harden_link_add":
-        context.user_data['await'] = 'harden_link_add'
-        await query.edit_message_text("🔗 **গ্রুপ লিংক পাঠান:**\nযেমন: https://t.me/yourgroup",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="harden_links")]]))
-    
-    elif data == "harden_history":
-        txt = "📋 **Hardening History**\n\n"
-        has_data = False
-        for acc in active_accounts:
-            tasks = load_harden_tasks().get(acc['id'], [])
-            if tasks:
-                has_data = True
-                txt += f"👤 {acc.get('name','?')}\n"
-                for t in tasks[-5:]:
-                    status = "✅" if t['status'] == 'completed' else "⏳"
-                    txt += f"  {status} {t['type']} - {t['created_at'][:16]}\n"
-                txt += "\n"
-        if not has_data:
-            txt += "কোনো ডাটা নেই। 1 Click Hardening ব্যবহার করুন।"
-        await query.edit_message_text(txt[:4000], parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
-    
     else:
-        await query.edit_message_text(f"⚠️ Unknown: {data}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
+        await query.edit_message_text(f"⚠️ Unknown: {data}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
 
 
 # ====== TEXT MESSAGE HANDLER ======
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id != OWNER_ID and user_id not in admins:
+    if user_id != OWNER_ID and user_id not in ADMIN_IDS:
         return
-
     text = update.message.text.strip()
     await_state = context.user_data.get('await')
-
     if not await_state:
+        # Check for commands
+        if text == '/menu':
+            await show_main_menu(update, context)
+        elif text.startswith('/add_reply'):
+            parts = text.split(' ', 2)
+            if len(parts) >= 3:
+                replies = load_replies()
+                replies.append({'keyword': parts[1].lower(), 'reply': parts[2], 'added_at': datetime.now().isoformat()})
+                save_replies(replies)
+                await update.message.reply_text(f"✅ রিপ্লাই যোগ: `{parts[1]}` → {parts[2][:30]}", parse_mode='Markdown')
+            else:
+                await update.message.reply_text("❌ Usage: /add_reply keyword reply_text")
+        elif text == '/new_join_link':
+            context.user_data['await'] = 'harden_link_add'
+            await update.message.reply_text("🔗 **গ্রুপ লিংক পাঠান:**", parse_mode='Markdown')
+        else:
+            await update.message.reply_text("❓ Unknown command. Use /menu")
         return
 
-    # ★★ NEW: Auto Delete Timer Days Set ★★
-    if await_state == 'autodel_days':
-        try:
-            val = int(text)
-            if 1 <= val <= 30:
-                set_setting('auto_delete_timer_days', val)
-                context.user_data.pop('await', None)
-                await update.message.reply_text(f"✅ অটো ডিলিট interval: {val} দিন সেট!",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_autodel")]]))
-            else:
-                await update.message.reply_text("❌ ১-৩০ এর মধ্যে দিন!")
-        except:
-            await update.message.reply_text("❌ সংখ্যা দিন (১-৩০)!")
+    if await_state == 'autodel_add_chat':
+        chat_id = None
+        if text.startswith('-100') or text.startswith('-'):
+            try:
+                chat_id = int(text)
+            except:
+                pass
+        elif update.message.forward_from_chat:
+            chat_id = update.message.forward_from_chat.id
+        
+        if chat_id and active_accounts:
+            phone = active_accounts[0].get('phone', 'unknown')
+            register_chat_for_auto_delete(phone, chat_id, str(chat_id))
+            context.user_data.pop('await', None)
+            await update.message.reply_text("✅ চ্যাট ট্র্যাকিংয়ে যোগ করা হয়েছে!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="auto_delete_menu")]]))
+        else:
+            await update.message.reply_text("❌ ভ্যালিড চ্যাট আইডি দিন বা ফরোয়ার্ড মেসেজ পাঠান!")
 
-    # Welcome texts
     elif await_state == 'welcome_text':
         set_setting('welcome_message', text)
         context.user_data.pop('await', None)
-        await update.message.reply_text("✅ ওয়েলকাম টেক্সট ১ আপডেট!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
+        await update.message.reply_text("✅ ওয়েলকাম টেক্সট ১ আপডেট!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
     
     elif await_state == 'welcome_text_2':
         set_setting('welcome_message_2', text)
         context.user_data.pop('await', None)
-        await update.message.reply_text("✅ ওয়েলকাম টেক্সট ২ আপডেট!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
+        await update.message.reply_text("✅ ওয়েলকাম টেক্সট ২ আপডেট!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
     
-    # Wait time
     elif await_state == 'wait_time':
         try:
             val = max(0, min(600, int(text)))
             set_setting('wait_time', val)
             context.user_data.pop('await', None)
-            await update.message.reply_text(f"✅ Wait time: {val}s",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_waittime")]]))
+            await update.message.reply_text(f"✅ Wait time: {val}s", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_waittime")]]))
         except:
             await update.message.reply_text("❌ সংখ্যা দিন (0-600)!")
     
-    # Typing time
     elif await_state == 'typing_time':
         try:
             val = int(text)
             if 0 <= val <= 300:
                 set_setting('typing_duration', val)
                 context.user_data.pop('await', None)
-                await update.message.reply_text(f"✅ Typing: {val}s",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_typing")]]))
+                await update.message.reply_text(f"✅ Typing: {val}s", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_typing")]]))
             else:
                 await update.message.reply_text("❌ 0-300 এর মধ্যে দিন!")
         except:
             await update.message.reply_text("❌ সংখ্যা দিন!")
     
-    # Ignore messages
     elif await_state == 'ignore':
         set_setting('ignored_messages', text)
         context.user_data.pop('await', None)
-        await update.message.reply_text("✅ ইগনোর মেসেজ আপডেট!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
-    
-    # UPI / Paytm
+        await update.message.reply_text("✅ ইগনোর মেসেজ আপডেট!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
+
+    elif await_state == 'harden_name':
+        set_setting('new_account_name', text)
+        context.user_data.pop('await', None)
+        await update.message.reply_text(f"✅ নাম সেট: {text}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
+
+    elif await_state == 'harden_bio':
+        set_setting('new_account_bio', text)
+        context.user_data.pop('await', None)
+        await update.message.reply_text(f"✅ বায়ো সেট!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
+
+    elif await_state == 'harden_link_add':
+        links = load_autojoin_links()
+        links.append(text)
+        save_autojoin_links(links)
+        context.user_data.pop('await', None)
+        await update.message.reply_text(f"✅ লিংক যোগ!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="harden_links")]]))
+
+    elif await_state == 'ch_add_main':
+        ch_data = load_channel_backup()
+        ch_data['main_channels'].append({'id': text, 'title': text, 'type': 'main'})
+        save_channel_backup(ch_data)
+        context.user_data.pop('await', None)
+        await update.message.reply_text(f"✅ মূল চ্যানেল যোগ!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
+
+    elif await_state == 'ch_add_backup':
+        ch_data = load_channel_backup()
+        ch_data['backup_channels'].append({'id': text, 'title': text, 'type': 'backup'})
+        save_channel_backup(ch_data)
+        context.user_data.pop('await', None)
+        await update.message.reply_text(f"✅ ব্যাকআপ চ্যানেল যোগ!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
+
     elif await_state == 'upi':
         set_setting('upi_id', text)
         context.user_data.pop('await', None)
-        await update.message.reply_text("✅ UPI সেট!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="st_pay")]]))
+        await update.message.reply_text("✅ UPI সেট!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="st_pay")]]))
     
     elif await_state == 'paytm':
         set_setting('paytm_num', text)
         context.user_data.pop('await', None)
-        await update.message.reply_text("✅ PayTm সেট!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="st_pay")]]))
+        await update.message.reply_text("✅ PayTm সেট!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="st_pay")]]))
     
-    # Broadcast
     elif await_state == 'broadcast':
         context.user_data.pop('await', None)
         msg = f"📢 **BROADCAST**\n\n{text}"
@@ -2467,17 +1588,13 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 sent += 1
                 await asyncio.sleep(0.1)
             except: pass
-        await update.message.reply_text(f"✅ {sent} কাস্টমারকে পাঠানো হয়েছে!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_adm")]]))
+        await update.message.reply_text(f"✅ {sent} কাস্টমারকে পাঠানো হয়েছে!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_adm")]]))
     
-    # Spam message add
     elif await_state == 'gs_msg_add':
         add_spam_message(text)
         context.user_data.pop('await', None)
-        await update.message.reply_text("✅ স্প্যাম মেসেজ যোগ!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="gs_msg")]]))
-    
-    # Phone number entry
+        await update.message.reply_text("✅ স্প্যাম মেসেজ যোগ!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="gs_msg")]]))
+
     elif await_state == 'ac_ph':
         context.user_data['phone'] = text
         context.user_data['await'] = 'ac_otp'
@@ -2493,25 +1610,21 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             await update.message.reply_text(f"❌ Failed: {str(e)[:100]}")
             context.user_data.pop('await', None)
-    
-    # OTP entry
+
     elif await_state == 'ac_otp':
         otp = text.replace(' ', '')
         client = context.user_data.get('ac_client')
         phone = context.user_data.get('phone', '')
         pch = context.user_data.get('ac_phone_code_hash', '')
-        
         if not client:
             await update.message.reply_text("❌ Session expired! আবার শুরু করুন।")
             context.user_data.pop('await', None)
             return
-        
         try:
             await client.sign_in(phone=phone, code=otp, phone_code_hash=pch)
             me = await client.get_me()
             session_str = client.session.save()
             name = me.first_name or 'Unknown'
-            
             acc = {
                 'id': gen_acc_id(),
                 'name': name,
@@ -2527,14 +1640,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             }
             add_account_data(acc)
             await client.disconnect()
-            
             context.user_data.pop('await', None)
             context.user_data.pop('ac_client', None)
             context.user_data.pop('phone', None)
-            
-            await update.message.reply_text(f"✅ অ্যাকাউন্ট যোগ!\n👤 {name}\n📱 {phone}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-            
+            await update.message.reply_text(f"✅ অ্যাকাউন্ট যোগ!\n👤 {name}\n📱 {phone}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
             try:
                 n_client = await start_account(acc)
                 if n_client:
@@ -2542,37 +1651,28 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_clients[acc['id']] = n_client
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
-                    register_ar(n_client, acc)
-                    # Start 1 day auto delete timer
-                    asyncio.create_task(schedule_auto_delete_messages(acc['id'], n_client, days=get_setting('auto_delete_timer_days', 1)))
-                    await update.message.reply_text("✅ অটো-অ্যাক্টিভেটেড! অটো ডিলিট টাইমার সেট!")
             except: pass
-            
         except SessionPasswordNeededError:
             context.user_data['await'] = 'ac_2fa'
             await update.message.reply_text("🔐 ২FA পাসওয়ার্ড দিন:")
         except PhoneCodeInvalidError:
             await update.message.reply_text("❌ ভুল OTP! আবার দিন:")
         except PhoneCodeExpiredError:
-            await update.message.reply_text("❌ OTP expired. আবার শুরু করুন /start")
+            await update.message.reply_text("❌ OTP expired. আবার শুরু করুন")
             context.user_data.pop('await', None)
-    
-    # 2FA password
+
     elif await_state == 'ac_2fa':
         client = context.user_data.get('ac_client')
         phone = context.user_data.get('phone', '')
-        
         if not client:
             await update.message.reply_text("❌ Session expired!")
             context.user_data.pop('await', None)
             return
-        
         try:
             await client.sign_in(password=text)
             me = await client.get_me()
             session_str = client.session.save()
             name = me.first_name or 'Unknown'
-            
             acc = {
                 'id': gen_acc_id(),
                 'name': name,
@@ -2588,14 +1688,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             }
             add_account_data(acc)
             await client.disconnect()
-            
             context.user_data.pop('await', None)
             context.user_data.pop('ac_client', None)
             context.user_data.pop('phone', None)
-            
-            await update.message.reply_text(f"✅ অ্যাকাউন্ট যোগ!\n👤 {name}\n📱 {phone}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-            
+            await update.message.reply_text(f"✅ অ্যাকাউন্ট যোগ!\n👤 {name}\n📱 {phone}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
             try:
                 n_client = await start_account(acc)
                 if n_client:
@@ -2603,16 +1699,11 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_clients[acc['id']] = n_client
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
-                    register_ar(n_client, acc)
-                    asyncio.create_task(schedule_auto_delete_messages(acc['id'], n_client, days=get_setting('auto_delete_timer_days', 1)))
-                    await update.message.reply_text("✅ অটো-অ্যাক্টিভেটেড! অটো ডিলিট টাইমার সেট!")
             except: pass
-            
         except Exception as e:
             await update.message.reply_text(f"❌ ২FA failed: {str(e)[:100]}")
             context.user_data.pop('await', None)
-    
-    # Session string
+
     elif await_state == 'ac_ss':
         if len(text) < 10:
             await update.message.reply_text("❌ Invalid session string!")
@@ -2641,9 +1732,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 add_account_data(acc)
                 await client.disconnect()
                 context.user_data.pop('await', None)
-                await update.message.reply_text(f"✅ অ্যাকাউন্ট যোগ!\n👤 {name}\n📱 {phone}",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
-                
+                await update.message.reply_text(f"✅ অ্যাকাউন্ট যোগ!\n👤 {name}\n📱 {phone}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_acc")]]))
                 try:
                     n_client = await start_account(acc)
                     if n_client:
@@ -2651,9 +1740,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                         account_clients[acc['id']] = n_client
                         account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                         account_stop_flags[acc['id']] = False
-                        register_ar(n_client, acc)
-                        asyncio.create_task(schedule_auto_delete_messages(acc['id'], n_client, days=get_setting('auto_delete_timer_days', 1)))
-                        await update.message.reply_text("✅ অটো-অ্যাক্টিভেটেড! অটো ডিলিট টাইমার সেট!")
                 except: pass
             else:
                 await update.message.reply_text("❌ ইউজার ইনফো পাওয়া যায়নি!")
@@ -2661,11 +1747,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(f"❌ Invalid session: {str(e)[:100]}")
         finally:
             context.user_data.pop('await', None)
-    
-    # Backup session string
+
     elif await_state == 'ac_bk_ss':
         if len(text) < 10:
-            await update.message.reply_text("❌ Invalid session!")
+            await update.message.reply_text("❌ Invalid session string!")
             return
         try:
             session_test = StringSession(text)
@@ -2688,403 +1773,181 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     'is_backup': True,
                     'added_at': datetime.now().isoformat()
                 }
-                add_account_data(acc, is_backup=True)
+                add_account_data(acc)
                 await client.disconnect()
                 context.user_data.pop('await', None)
-                await update.message.reply_text(f"✅ ব্যাকআপ যোগ!\n👤 {name}\n📱 {phone}",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
+                await update.message.reply_text(f"✅ ব্যাকআপ অ্যাকাউন্ট যোগ!\n👤 {name}\n📱 {phone}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
             else:
-                await update.message.reply_text("❌ Invalid session!")
+                await update.message.reply_text("❌ ইউজার ইনফো পাওয়া যায়নি!")
         except Exception as e:
-            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+            await update.message.reply_text(f"❌ Invalid session: {str(e)[:100]}")
+        finally:
             context.user_data.pop('await', None)
-    
-    # Channel backup handlers
-    elif await_state == 'ch_add_main':
-        channel_identifier = text.strip()
-        try:
-            if active_accounts and active_accounts[0]['id'] in account_clients:
-                client = account_clients[active_accounts[0]['id']]
-                
-                if channel_identifier.startswith('-100'):
-                    entity = await client.get_entity(int(channel_identifier))
-                elif channel_identifier.startswith('@'):
-                    entity = await client.get_entity(channel_identifier)
-                else:
-                    if 't.me/' in channel_identifier:
-                        username = channel_identifier.split('/')[-1].split('?')[0]
-                        entity = await client.get_entity(username)
-                    else:
-                        entity = await client.get_entity(channel_identifier)
-                
-                if hasattr(entity, 'title'):
-                    channel_info = {
-                        'id': entity.id,
-                        'title': entity.title,
-                        'username': getattr(entity, 'username', ''),
-                        'type': 'main',
-                        'added_at': datetime.now().isoformat()
-                    }
-                    if add_main_channel(channel_info):
-                        await update.message.reply_text(f"✅ মূল চ্যানেল যোগ!\n📛 {entity.title}\n🆔 {entity.id}",
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
-                    else:
-                        await update.message.reply_text("❌ ইতিমধ্যে যোগ করা আছে!",
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
-                else:
-                    await update.message.reply_text("❌ এটি একটি চ্যানেল নয়!")
-            else:
-                await update.message.reply_text("❌ কোনো একটিভ অ্যাকাউন্ট নেই!")
-        except Exception as e:
-            await update.message.reply_text(f"❌ চ্যানেল খুঁজে পাইনি: {str(e)[:50]}")
-        
-        context.user_data.pop('await', None)
-    
-    elif await_state == 'ch_add_backup':
-        channel_identifier = text.strip()
-        try:
-            if active_accounts and active_accounts[0]['id'] in account_clients:
-                client = account_clients[active_accounts[0]['id']]
-                
-                if channel_identifier.startswith('-100'):
-                    entity = await client.get_entity(int(channel_identifier))
-                elif channel_identifier.startswith('@'):
-                    entity = await client.get_entity(channel_identifier)
-                else:
-                    if 't.me/' in channel_identifier:
-                        username = channel_identifier.split('/')[-1].split('?')[0]
-                        entity = await client.get_entity(username)
-                    else:
-                        entity = await client.get_entity(channel_identifier)
-                
-                if hasattr(entity, 'title'):
-                    channel_info = {
-                        'id': entity.id,
-                        'title': entity.title,
-                        'username': getattr(entity, 'username', ''),
-                        'type': 'backup',
-                        'added_at': datetime.now().isoformat()
-                    }
-                    if add_backup_channel(channel_info):
-                        await update.message.reply_text(f"✅ ব্যাকআপ চ্যানেল যোগ!\n📛 {entity.title}\n🆔 {entity.id}",
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
-                    else:
-                        await update.message.reply_text("❌ ইতিমধ্যে যোগ করা আছে!",
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
-                else:
-                    await update.message.reply_text("❌ এটি একটি চ্যানেল নয়!")
-            else:
-                await update.message.reply_text("❌ কোনো একটিভ অ্যাকাউন্ট নেই!")
-        except Exception as e:
-            await update.message.reply_text(f"❌ চ্যানেল খুঁজে পাইনি: {str(e)[:50]}")
-        
-        context.user_data.pop('await', None)
-    
-    # Hardening handlers
-    elif await_state == 'harden_name':
-        set_setting('new_account_name', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text(f"✅ নাম সেভ!\n1 Click Hardening করলে সেট হবে।",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
-    
-    elif await_state == 'harden_bio':
-        set_setting('new_account_bio', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text(f"✅ বায়ো সেভ!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_harden")]]))
-    
-    elif await_state == 'harden_link_add':
-        link = text.strip()
-        if 't.me/' in link or 'telegram.me/' in link:
-            add_autojoin_link(link)
-            context.user_data.pop('await', None)
-            await update.message.reply_text(f"✅ লিংক যোগ! পরবর্তী Hardening এ অটো জয়েন হবে।",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="harden_links")]]))
-        else:
-            await update.message.reply_text("❌ ভ্যালিড টেলিগ্রাম লিংক দিন!")
-    
+
     else:
-        await update.message.reply_text(f"⚠️ Unknown: {await_state}")
         context.user_data.pop('await', None)
+        await update.message.reply_text("❓ Unknown input. Use /menu")
 
 
-# ====== PHOTO HANDLER ======
+# ====== PHOTO MESSAGE HANDLER ======
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id != OWNER_ID and user_id not in admins:
+    if user_id != OWNER_ID and user_id not in ADMIN_IDS:
         return
-
     await_state = context.user_data.get('await')
-
+    if not await_state:
+        return
+    
     if await_state == 'welcome_image':
         try:
-            photo = await update.message.photo[-1].get_file()
-            await photo.download_to_drive(str(WELCOME_IMAGE_FILE))
+            photo = update.message.photo[-1]
+            file = await context.bot.get_file(photo.file_id)
+            await file.download_to_drive(WELCOME_IMAGE_FILE)
             context.user_data.pop('await', None)
-            await update.message.reply_text("✅ ওয়েলকাম ইমেজ আপডেট!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
+            await update.message.reply_text("✅ ওয়েলকাম ইমেজ সেট!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ar_welcome")]]))
         except Exception as e:
-            await update.message.reply_text(f"❌ Failed: {str(e)[:50]}")
-
+            await update.message.reply_text(f"❌ Failed: {str(e)[:80]}")
+    
     elif await_state == 'qr_code':
         try:
-            photo = await update.message.photo[-1].get_file()
-            await photo.download_to_drive(str(QR_CODE_FILE))
+            photo = update.message.photo[-1]
+            file = await context.bot.get_file(photo.file_id)
+            await file.download_to_drive(QR_CODE_FILE)
             context.user_data.pop('await', None)
-            await update.message.reply_text("✅ QR Code সেভ!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_set")]]))
+            await update.message.reply_text("✅ QR Code সেট!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_set")]]))
         except Exception as e:
-            await update.message.reply_text(f"❌ Failed: {str(e)[:50]}")
-
+            await update.message.reply_text(f"❌ Failed: {str(e)[:80]}")
+    
     else:
-        await update.message.reply_text("ℹ️ No action expected.")
+        await update.message.reply_text("❓ Unexpected photo.")
 
 
-# ====== COMMANDS ======
-async def add_reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("⛔ Unauthorized!")
-        return
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text("Usage: /add_reply keyword reply\nExample: /add_reply price Check price!")
-        return
-    keyword = args[0].lower()
-    reply = ' '.join(args[1:])
-    replies = load_json(REPLIES_FILE, [])
-    for r in replies:
-        if r['keyword'] == keyword:
-            r['reply'] = reply
-            save_json(REPLIES_FILE, replies)
-            await update.message.reply_text(f"✅ `{keyword}` আপডেট!", parse_mode='Markdown')
-            return
-    replies.append({'keyword': keyword, 'reply': reply, 'type': 'contains', 'added_at': datetime.now().isoformat()})
-    save_json(REPLIES_FILE, replies)
-    await update.message.reply_text(f"✅ `{keyword}` যোগ!", parse_mode='Markdown')
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        return
-    ttl_auto = sum(account_stats.get(a['id'], {}).get('auto_sent', 0) for a in active_accounts)
-    ttl_spam = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
-    timer_data = load_auto_delete_timers()
-    deleted = timer_data.get('deleted_messages', 0)
-    txt = f"📊 **STATUS**\n\n👤 Active: {len(active_accounts)}\n💬 Auto Sent: {ttl_auto}\n📬 Spam Sent: {ttl_spam}\n👥 Customers: {len(customer_count)}\n🧹 Auto Deleted: {deleted}"
-    await update.message.reply_text(txt, parse_mode='Markdown')
-
-async def new_join_link_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        return
-    args = context.args
-    if len(args) < 1:
-        links = load_autojoin_links()
-        txt = "🔗 **Auto Join Links**\n\n"
-        if links:
-            for i, link in enumerate(links, 1):
-                txt += f"{i}. {link}\n"
-        else: txt += "কোনো লিংক নেই।"
-        await update.message.reply_text(txt, parse_mode='Markdown')
-        return
-    link = args[0]
-    if add_autojoin_link(link):
-        await update.message.reply_text(f"✅ লিংক যোগ!\n{link}")
-    else:
-        await update.message.reply_text("❌ Already exists or invalid!")
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        return
-    txt = """🔥 **HELP** 🔥
-
-**Commands:**
-/start - Control Panel
-/status - Quick Status
-/help - এই মেসেজ
-/add_reply kw text - কাস্টম রিপ্লাই
-/new_join_link link - গ্রুপ জয়েন লিংক
-
-**★★★ MAIN FEATURES ★★★**
-✅ Auto Reply (Wait + Typing)
-✅ Multiple Message Detection
-✅ Group Spam (Speed Control)
-✅ QR Code Payment
-✅ Block Photo
-✅ Backup → Running (1 Click)
-✅ ★ Restricted Auto Logout (2 sec)
-✅ ★ Account Hardening (1 Click)
-  → ★ ২৪ ঘন্টা ওয়েট রিমুভ! এখনই ডিভাইস রিমুভ!
-✅ ★ Channel Backup System
-  - Main + Backup Channel সেট
-  - Kick/Block হলে Auto Backup Join
-  - Backup Channel এ Auto Spam
-  - Customer কখনো হারাবে না! 🔥
-✅ ★ Auto Delete Timer (1 Day)
-  - প্রতি ঘন্টায় চেক
-  - ১ দিন পর পুরনো মেসেজ অটো ডিলিট
-  - Customer কনভার্সেশন ক্লিন থাকে!
-"""
-    await update.message.reply_text(txt, parse_mode='Markdown')
-
-
-# ====== DEVICE LOGIN INFO ======
-async def get_device_login_info(acc_id):
-    if acc_id not in account_clients:
-        return "❌ Account not connected!"
-    
-    client = account_clients[acc_id]
+# ====== ERROR HANDLER ======
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Update {update} caused error {context.error}")
     try:
-        from telethon.tl.functions.account import GetAuthorizationsRequest
-        auths = await client(GetAuthorizationsRequest())
-        current_hash = getattr(auths.authorizations[0], 'hash', 0) if auths.authorizations else 0
-        
-        info = []
-        for i, auth in enumerate(auths.authorizations):
-            app_name = auth.app_name or 'Unknown'
-            device_model = auth.device_model or 'Unknown'
-            platform = auth.platform or '?'
-            country = auth.country or '??'
-            is_current = "⭐ CURRENT" if auth.hash == current_hash else ""
-            
-            # ★★ REMOVED: 24hr wait - now shows "Immediate Remove Available" ★★
-            can_delete = "✅ এখনই রিমুভ করা যাবে" if not is_current else "🚫 বর্তমান ডিভাইস"
-            
-            info.append(f"{'⭐ ' if is_current else ''}{i+1}. **{app_name}**\n📱 {device_model} ({platform})\n🌍 {country}\n🔑 {can_delete}")
-        
-        return "\n\n".join(info) if info else "ℹ️ No login info"
-    except Exception as e:
-        return f"❌ Error: {str(e)[:50]}"
+        if update and update.effective_message:
+            await update.effective_message.reply_text(f"⚠️ Error: {str(context.error)[:100]}")
+    except:
+        pass
 
 
-# ====== FLASK ======
-@flask_app.route('/')
-def index():
-    return jsonify({
-        'status': 'running',
-        'accounts': len(active_accounts),
-        'time': datetime.now().isoformat(),
-        'restricted_checker': '✅ Active (every 2s)',
-        'channel_monitor': '✅ Active (every 30s)',
-        'auto_delete_timer': '✅ Active (every 1h)'
-    })
-
-@flask_app.route('/health')
-def health():
-    return jsonify({'status': 'ok', 'bot_ready': bot_ready, 'accounts': len(active_accounts)})
-
-async def run_flask():
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False))
-
-
-# ====== MAIN SETUP ======
-async def main_async():
-    global ptb_application, bot_ready, bot_event_loop
-
-    bot_event_loop = asyncio.get_event_loop()
-    _load_settings()
-
-    # Setup PTB - ★★ FIXED: Removed updater, use direct polling ★★
-    ptb = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
-    ptb_application = ptb
-
-    # Add handlers
-    ptb.add_handler(CommandHandler("start", start_command))
-    ptb.add_handler(CommandHandler("status", status_command))
-    ptb.add_handler(CommandHandler("help", help_command))
-    ptb.add_handler(CommandHandler("add_reply", add_reply_command))
-    ptb.add_handler(CommandHandler("new_join_link", new_join_link_command))
-    ptb.add_handler(CallbackQueryHandler(handle_callback))
-    ptb.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-    ptb.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
-
-    # Start polling - ★★ FIXED: Direct run_polling instead of updater ★★
-    await ptb.initialize()
-    await ptb.start()
-    await ptb.updater.start_polling(drop_pending_updates=True)
-
-    # Setup accounts
-    await setup_auto_reply()
-
-    # ★★★ START BACKGROUND TASKS ★★★
-    # 1. Restricted account checker (every 2 seconds)
-    asyncio.create_task(check_restricted_accounts_loop())
-    logger.info("🔍★ Restricted account checker - every 2 seconds!")
+# ====== MAIN FUNCTION ======
+async def main():
+    """Main entry point - no Updater error, no run_polling crash."""
+    logger.info("Starting HackerAI Pentest Bot...")
     
-    # 2. Channel backup monitor (every 30 seconds)
-    asyncio.create_task(monitor_channels_loop())
-    logger.info("📡★ Channel backup monitor - every 30 seconds!")
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN not set!")
+        return
     
-    # 3. ★★ NEW: Auto Delete Timer (every hour) ★★
-    asyncio.create_task(auto_delete_messages_loop())
-    logger.info("🧹★ Auto Delete Timer started - every hour!")
+    # Build application
+    app = Application.builder().token(BOT_TOKEN).build()
     
-    # 4. Periodic status check
-    asyncio.create_task(check_account_status_periodically())
+    # Register handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", menu))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
+    app.add_error_handler(error_handler)
     
-    # 5. Flask web server
-    asyncio.create_task(run_flask())
-
-    bot_ready = True
-
-    # Notify owner
+    # Initialize
+    await app.initialize()
+    await app.start()
+    
+    # Load customer count
+    global customer_count
+    customer_count = set(load_json(CUSTOMERS_FILE, []))
+    
+    # Load active accounts from disk
+    all_accs = get_all_accounts()
+    for acc in all_accs:
+        if not acc.get('is_backup'):
+            try:
+                nc = await start_account(acc)
+                if nc:
+                    active_accounts.append(acc)
+                    account_clients[acc['id']] = nc
+                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
+                    account_stop_flags[acc['id']] = False
+                    logger.info(f"Loaded account: {acc.get('name')} ({acc.get('phone')})")
+            except Exception as e:
+                logger.error(f"Failed to load account {acc.get('name')}: {e}")
+    
+    # Start background tasks
+    asyncio.create_task(auto_delete_messages_loop(app))
+    asyncio.create_task(keepalive_loop())
+    asyncio.create_task(account_health_loop())
+    
+    # Start polling - this is the FIX for the Updater error
+    await app.updater.start_polling(drop_pending_updates=True)
+    
+    logger.info(f"Bot started! {len(active_accounts)} accounts loaded.")
+    
+    # Keep running
     try:
-        await ptb.bot.send_message(
-            chat_id=OWNER_ID,
-            text=f"🔥 **Bot Ready!** 🔥\n\n"
-                 f"👤 Accounts: {len(active_accounts)}\n"
-                 f"🤖 Auto Reply: {'ON' if auto_reply_enabled else 'OFF'}\n"
-                 f"📨 Group Spam: {'ON' if group_spam_enabled else 'OFF'}\n"
-                 f"🛡️ Restricted Check: ✅ প্রতি ২ সেকেন্ডে\n"
-                 f"📡 Channel Backup: ✅ প্রতি ৩০ সেকেন্ডে\n"
-                 f"🧹 Auto Delete Timer: ✅ প্রতি ঘন্টায় (১ দিন)\n"
-                 f"🔐 Hardening: ✅ Available (২৪ঘ ওয়েট রিমুভ!)\n\n"
-                 f"⚡ সিস্টেম সম্পূর্ণ প্রস্তুত!",
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Owner notify failed: {e}")
-
-    logger.info(f"✅ Bot Ready! {len(active_accounts)} accounts. All systems active.")
-
-    await shutdown_event.wait()
-
-
-async def shutdown_bot():
-    global bot_ready
-    logger.info("Shutting down...")
-    bot_ready = False
-    shutdown_event.set()
-
-    for tid in list(account_spam_tasks.keys()):
-        try: account_spam_tasks[tid].cancel()
-        except: pass
-
-    for tid in list(account_keepalive_tasks.keys()):
-        try: account_keepalive_tasks[tid].cancel()
-        except: pass
-
-    for aid, cli in account_clients.items():
-        try: await cli.disconnect()
-        except: pass
-
-    if ptb_application:
-        try:
-            await ptb_application.stop()
-            await ptb_application.shutdown()
-        except: pass
-
-    logger.info("Shutdown complete.")
-
-
-def main():
-    try:
-        asyncio.run(main_async())
+        while True:
+            await asyncio.sleep(3600)
     except KeyboardInterrupt:
-        asyncio.run(shutdown_bot())
+        logger.info("Shutting down...")
+    except asyncio.CancelledError:
+        logger.info("Tasks cancelled, shutting down...")
+    finally:
+        logger.info("Stopping bot...")
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+        # Disconnect all accounts
+        for aid, client in list(account_clients.items()):
+            try:
+                await client.disconnect()
+            except:
+                pass
+        logger.info("Bot stopped.")
+
+
+# ====== FLASK WEBHOOK (optional) ======
+if FLASK_AVAILABLE:
+    flask_app = Flask(__name__)
+    flask_app.secret_key = WEBHOOK_SECRET
+    
+    @flask_app.route('/')
+    def home():
+        return jsonify({"status": "running", "accounts": len(active_accounts), "customers": len(customer_count)})
+    
+    @flask_app.route('/health')
+    def health():
+        return jsonify({"status": "ok", "timestamp": datetime.now().isoformat()})
+    
+    def run_flask():
+        flask_app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)), debug=False, use_reloader=False)
+
+
+# ====== ENTRY POINT ======
+if __name__ == "__main__":
+    logger.info("=" * 50)
+    logger.info("HackerAI Pentest Bot Starting...")
+    logger.info(f"Python: {sys.version}")
+    logger.info(f"PTB Available: {PTB_AVAILABLE}")
+    logger.info(f"Telethon Available: {TELETHON_AVAILABLE}")
+    logger.info(f"Flask Available: {FLASK_AVAILABLE}")
+    logger.info(f"Accounts file: {ACCOUNTS_FILE}")
+    logger.info(f"Auto-delete file: {AUTO_DELETE_FILE}")
+    logger.info("=" * 50)
+    
+    # Start Flask in a thread if available (for Render web service)
+    if FLASK_AVAILABLE and os.environ.get('RENDER', ''):
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        logger.info("Flask web server started in background thread")
+    
+    # Run main async function
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        traceback.print_exc()
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
