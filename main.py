@@ -1584,8 +1584,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['phone'] = text
         context.user_data['await'] = 'ac_otp'
         try:
-            ac_api_id = int(get_setting('ac_api_id', DEFAULT_API_ID))
-            ac_api_hash = get_setting('ac_api_hash', DEFAULT_API_HASH)
+            # পরিবর্তন ১: Environment Variable থেকে নাও, তারপর DEFAULT
+ac_api_id = int(os.environ.get('API_ID', str(DEFAULT_API_ID)))
+ac_api_hash = os.environ.get('API_HASH', DEFAULT_API_HASH)
             client = TelegramClient(StringSession(), ac_api_id, ac_api_hash)
             await client.connect()
             send_code = await client.send_code_request(text)
