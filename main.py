@@ -272,6 +272,7 @@ def register_chat_for_auto_delete(phone, chat_id, chat_title=""):
 
 async def auto_delete_messages_loop(app=None):
     """Background loop that checks every 30 min and deletes messages older than N days."""
+    global account_clients, active_accounts
     await asyncio.sleep(60)
     while True:
         try:
@@ -580,6 +581,7 @@ async def harden_account_one_click(acc):
 # ====== BACKGROUND TASKS ======
 async def keepalive_loop():
     """Keep accounts alive by periodic ping."""
+    global account_clients, active_accounts
     while True:
         try:
             for aid, client in list(account_clients.items()):
@@ -612,6 +614,7 @@ async def keepalive_loop():
 
 async def account_health_loop():
     """Monitor account health and report issues."""
+    global account_clients, account_stats
     while True:
         try:
             for aid, client in list(account_clients.items()):
@@ -627,6 +630,7 @@ async def account_health_loop():
             await asyncio.sleep(600)
         except:
             await asyncio.sleep(60)
+
 # ====== BOT HANDLERS ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -671,6 +675,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== BUTTON CALLBACK HANDLER ======
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled, account_id_counter, account_clients, active_accounts, account_stats, account_stop_flags, account_keepalive_tasks, account_spam_tasks, customer_count
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -948,7 +953,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ac_bk_del":
         ba = get_backup_accounts()
         if not ba:
-            await query.edit_message_text("❌ কোনো ব্যাকআপ নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
+            await query.edit_message_text("❌ কোনো ব্যাকআপ নেই!", reply_markup=InlineKeyboardMarkup([[InlineButton("🔙 পিছনে", callback_data="ac_bk")]]))
             return
         kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"acbkd_{a['id']}")] for a in ba]
         kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")])
@@ -1093,6 +1098,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_setting('channel_backup_enabled', not cur)
         status = "🟢 চালু" if not cur else "🔴 বন্ধ"
         await query.edit_message_text(f"✅ চ্যানেল ব্যাকআপ {status} হয়েছে!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
+    
     # ====== AUTO REPLY ======
     elif data == "m_ar":
         running = sum(1 for a in active_accounts if a.get('enabled', True))
@@ -1113,12 +1119,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "ar_start":
-        global auto_reply_enabled
         auto_reply_enabled = True
         await query.edit_message_text("✅ **অটো রিপ্লাই চালু!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
     elif data == "ar_stop":
-        global auto_reply_enabled
         auto_reply_enabled = False
         await query.edit_message_text("⏹️ **অটো রিপ্লাই বন্ধ!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
@@ -1262,8 +1266,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "gs_start":
+        elif data == "gs_start":
         global group_spam_enabled
         group_spam_enabled = True
         await query.edit_message_text("✅ স্প্যাম চালু!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
@@ -1359,7 +1362,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fs = "🟢" if cur else "🔴"
         ln = "🟢" if logout_notification_enabled else "🔴"
         has_qr = "✅" if QR_CODE_FILE.exists() else "❌"
-        txt = f"⚙️ **Settings**\n🚫 Block Photo: {bp}\n🐢 Flood Slow: {fs}\n🔔 Logout Alert: {ln}\n📷 QR Code: {has_qr}"
+        txt = f"⚙️ **Settings**\n🚫 Block Phone: {bp}\n🐢 Flood Slow: {fs}\n🔔 Logout Alert: {ln}\n📷 QR Code: {has_qr}"
         kb = [
             [InlineKeyboardButton(f"🚫 Block Photo {bp}", callback_data="st_bp")],
             [InlineKeyboardButton(f"🐢 Flood Slow {fs}", callback_data="st_fs")],
@@ -1458,6 +1461,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== TEXT MESSAGE HANDLER ======
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global auto_reply_enabled, group_spam_enabled, customer_count, account_clients, active_accounts, account_stats, account_stop_flags
     user_id = update.effective_user.id
     if user_id != OWNER_ID and user_id not in ADMIN_IDS:
         return
