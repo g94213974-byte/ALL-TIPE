@@ -1586,7 +1586,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             elif await_state == 'ac_ph':
     context.user_data['phone'] = text
-    context.user_data['await'] = 'ac_otp':
+    context.user_data['await'] = 'ac_otp'
     try:
         ac_api_id = int(os.environ.get('API_ID', str(DEFAULT_API_ID)))
         ac_api_hash = os.environ.get('API_HASH', DEFAULT_API_HASH)
