@@ -1,6 +1,4 @@
-telethon==1.35.0
 python-telegram-bot==20.7
-python-telegram-bot[job-queue]==20.7
-Flask==3.0.2
-PySocks==1.7.1
-gunicorn==21.2.0
+telethon==1.35.0
+flask==3.0.2
+cryptography
