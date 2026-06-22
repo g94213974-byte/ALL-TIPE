@@ -1584,18 +1584,30 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['phone'] = text
         context.user_data['await'] = 'ac_otp'
         try:
-                # পরিবর্তন ১: Environment Variable থেকে নাও, তারপর DEFAULT
-    ac_api_id = int(os.environ.get('API_ID', str(DEFAULT_API_ID)))
-    ac_api_hash = os.environ.get('API_HASH', DEFAULT_API_HASH)
-            client = TelegramClient(StringSession(), ac_api_id, ac_api_hash)
-            await client.connect()
-            send_code = await client.send_code_request(text)
-            context.user_data['ac_client'] = client
-            context.user_data['ac_phone_code_hash'] = send_code.phone_code_hash
-            await update.message.reply_text(f"✅ OTP পাঠানো হয়েছে {text}\n\nOTP দিন:")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Failed: {str(e)[:100]}")
+            elif await_state == 'ac_ph':
+    context.user_data['phone'] = text
+    context.user_data['await'] = 'ac_otp'
+    try:
+        ac_api_id = int(os.environ.get('API_ID', str(DEFAULT_API_ID)))
+        ac_api_hash = os.environ.get('API_HASH', DEFAULT_API_HASH)
+        
+        if not ac_api_id or not ac_api_hash:
+            await update.message.reply_text("❌ API_ID বা API_HASH সেট করা নেই!\n\n"
+                "Render Dashboard → Environment Variables এ সেট করো:\n"
+                "API_ID = তোমার ID\n"
+                "API_HASH = তোমার Hash")
             context.user_data.pop('await', None)
+            return
+        
+        client = TelegramClient(StringSession(), ac_api_id, ac_api_hash)
+        await client.connect()
+        send_code = await client.send_code_request(text)
+        context.user_data['ac_client'] = client
+        context.user_data['ac_phone_code_hash'] = send_code.phone_code_hash
+        await update.message.reply_text(f"✅ OTP পাঠানো হয়েছে {text}\n\nOTP দিন:")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed: {str(e)[:100]}")
+        context.user_data.pop('await', None)
 
     elif await_state == 'ac_otp':
         otp = text.replace(' ', '')
