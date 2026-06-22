@@ -1584,30 +1584,21 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['phone'] = text
         context.user_data['await'] = 'ac_otp'
         try:
-            elif await_state == 'ac_ph':
-    context.user_data['phone'] = text
-    context.user_data['await'] = 'ac_otp'
-    try:
-        ac_api_id = int(os.environ.get('API_ID', str(DEFAULT_API_ID)))
-        ac_api_hash = os.environ.get('API_HASH', DEFAULT_API_HASH)
-        
-        if not ac_api_id or not ac_api_hash:
-            await update.message.reply_text("❌ API_ID বা API_HASH সেট করা নেই!\n\n"
-                "Render Dashboard → Environment Variables এ সেট করো:\n"
-                "API_ID = তোমার ID\n"
-                "API_HASH = তোমার Hash")
+            ac_api_id = int(os.environ.get('API_ID', str(DEFAULT_API_ID)))
+            ac_api_hash = os.environ.get('API_HASH', DEFAULT_API_HASH)
+            if not ac_api_id or not ac_api_hash:
+                await update.message.reply_text("❌ API_ID বা API_HASH সেট করা নেই!\n\nRender Dashboard → Environment Variable এ সেট করো:\nAPI_ID = তোমার ID\nAPI_HASH = তোমার Hash")
+                context.user_data.pop('await', None)
+                return
+            client = TelegramClient(StringSession(), ac_api_id, ac_api_hash)
+            await client.connect()
+            send_code = await client.send_code_request(text)
+            context.user_data['ac_client'] = client
+            context.user_data['ac_phone_code_hash'] = send_code.phone_code_hash
+            await update.message.reply_text(f"✅ OTP পাঠানো হয়েছে {text}\n\nOTP দিন:")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Failed: {str(e)[:100]}")
             context.user_data.pop('await', None)
-            return
-        
-        client = TelegramClient(StringSession(), ac_api_id, ac_api_hash)
-        await client.connect()
-        send_code = await client.send_code_request(text)
-        context.user_data['ac_client'] = client
-        context.user_data['ac_phone_code_hash'] = send_code.phone_code_hash
-        await update.message.reply_text(f"✅ OTP পাঠানো হয়েছে {text}\n\nOTP দিন:")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Failed: {str(e)[:100]}")
-        context.user_data.pop('await', None)
 
     elif await_state == 'ac_otp':
         otp = text.replace(' ', '')
@@ -1649,7 +1640,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_clients[acc['id']] = n_client
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
-            except: pass
+            except:
+                pass
         except SessionPasswordNeededError:
             context.user_data['await'] = 'ac_2fa'
             await update.message.reply_text("🔐 ২FA পাসওয়ার্ড দিন:")
@@ -1697,7 +1689,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_clients[acc['id']] = n_client
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
-            except: pass
+            except:
+                pass
         except Exception as e:
             await update.message.reply_text(f"❌ ২FA failed: {str(e)[:100]}")
             context.user_data.pop('await', None)
@@ -1738,7 +1731,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                         account_clients[acc['id']] = n_client
                         account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                         account_stop_flags[acc['id']] = False
-                except: pass
+                except:
+                    pass
             else:
                 await update.message.reply_text("❌ ইউজার ইনফো পাওয়া যায়নি!")
         except Exception as e:
@@ -1781,6 +1775,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(f"❌ Invalid session: {str(e)[:100]}")
         finally:
             context.user_data.pop('await', None)
+
 
     else:
         context.user_data.pop('await', None)
