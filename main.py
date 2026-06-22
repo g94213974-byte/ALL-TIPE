@@ -627,7 +627,7 @@ async def account_health_loop():
             await asyncio.sleep(600)
         except:
             await asyncio.sleep(60)
-          # ====== BOT HANDLERS ======
+# ====== BOT HANDLERS ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_customer(user.id)
@@ -1093,7 +1093,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_setting('channel_backup_enabled', not cur)
         status = "🟢 চালু" if not cur else "🔴 বন্ধ"
         await query.edit_message_text(f"✅ চ্যানেল ব্যাকআপ {status} হয়েছে!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
-      # ====== AUTO REPLY ======
+    # ====== AUTO REPLY ======
     elif data == "m_ar":
         running = sum(1 for a in active_accounts if a.get('enabled', True))
         total = len(active_accounts)
