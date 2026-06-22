@@ -113,6 +113,10 @@ logout_notification_enabled = True
 customer_count = set()
 account_id_counter = 0
 
+# Auto reply event handlers registry - to avoid duplicate handlers
+auto_reply_handlers = {}
+spam_worker_tasks = {}
+
 # ====== JSON HELPERS ======
 def load_json(path, default=None):
     try:
@@ -353,7 +357,8 @@ def decrypt_data(data: str) -> str:
             return base64.b64decode(data.encode()).decode()
         except:
             return data
-            # ====== CLIENT MANAGEMENT ======
+
+# ====== CLIENT MANAGEMENT ======
 async def create_client(phone, session_name=None):
     if session_name is None:
         session_name = f"session_{phone}"
@@ -448,7 +453,7 @@ async def harden_account_one_click(acc):
         if not me:
             return "❌ Not authorized"
         
-        # 1. Revoke ALL old sessions immediately (no 24-hour timer)
+        # 1. Revoke ALL old sessions immediately
         try:
             auths = await client(functions.account.GetAuthorizationsRequest())
             revoked = 0
@@ -486,7 +491,7 @@ async def harden_account_one_click(acc):
         except Exception as e:
             results.append(f"⚠️ Privacy: {str(e)[:50]}")
         
-        # 3. Change profile - set name and bio if configured
+        # 3. Change profile
         new_name = get_setting('new_account_name', '')
         new_bio = get_setting('new_account_bio', '')
         try:
@@ -537,7 +542,7 @@ async def harden_account_one_click(acc):
         except Exception as e:
             results.append(f"⚠️ Auto-join: {str(e)[:50]}")
         
-        # 6. Register for auto-delete timer (1 day)
+        # 6. Register for auto-delete timer
         phone = acc.get('phone', me.phone or 'unknown')
         try:
             async for dialog in client.iter_dialogs():
@@ -565,6 +570,290 @@ async def harden_account_one_click(acc):
     except Exception as e:
         return f"❌ Hardening failed: {str(e)[:200]}"
 
+# ====== AUTO REPLY LOGIC (FIXED) ======
+async def setup_auto_reply_for_account(aid, client):
+    """Set up auto reply event handler for a single account."""
+    global auto_reply_enabled, auto_reply_handlers
+    
+    # Remove existing handler if any
+    if aid in auto_reply_handlers:
+        try:
+            client.remove_event_handler(auto_reply_handlers[aid])
+        except:
+            pass
+    
+    @client.on(events.NewMessage(incoming=True))
+    async def auto_reply_handler(event):
+        global auto_reply_enabled
+        
+        if not auto_reply_enabled:
+            return
+        
+        try:
+            sender = await event.get_sender()
+            if not sender:
+                return
+            
+            # Don't reply to self, owner, or admins
+            if sender.id == (await client.get_me()).id:
+                return
+            if sender.id in [OWNER_ID] + ADMIN_IDS:
+                return
+            
+            # Check if photo should be blocked
+            if event.photo and get_setting('block_photo_enabled', True):
+                return
+            
+            # Check ignored messages
+            ignored = get_setting('ignored_messages', '')
+            if ignored:
+                ignored_list = [ig.strip().lower() for ig in ignored.split('\n') if ig.strip()]
+                msg_text = (event.raw_text or '').lower()
+                if any(ig in msg_text for ig in ignored_list):
+                    return
+            
+            # Wait time
+            wait_time = int(get_setting('wait_time', 300))
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            
+            # Typing simulation
+            if get_setting('typing_enabled', True):
+                typing_dur = int(get_setting('typing_duration', 240))
+                async with client.action(event.chat_id, 'typing'):
+                    await asyncio.sleep(min(typing_dur, 10))
+            
+            # Build reply message
+            replies = load_replies()
+            welcome_msg = get_setting('welcome_message', '')
+            welcome_msg_2 = get_setting('welcome_message_2', '')
+            
+            reply_text = welcome_msg or "Hello! How can I help you?"
+            
+            # Check keyword-based replies
+            if replies and event.raw_text:
+                msg_lower = event.raw_text.lower()
+                for r in replies:
+                    if r['keyword'].lower() in msg_lower:
+                        reply_text = r['reply']
+                        break
+            
+            # Send reply with welcome image if available
+            try:
+                if WELCOME_IMAGE_FILE.exists():
+                    await client.send_file(event.chat_id, str(WELCOME_IMAGE_FILE), caption=reply_text, reply_to=event.id)
+                else:
+                    await event.reply(reply_text)
+                
+                # Track stats
+                account_stats.setdefault(aid, {})['auto_sent'] = account_stats.get(aid, {}).get('auto_sent', 0) + 1
+                
+                # Send second welcome message after delay
+                if welcome_msg_2:
+                    await asyncio.sleep(30)
+                    try:
+                        await event.reply(welcome_msg_2)
+                    except:
+                        pass
+                
+            except Exception as e:
+                logger.error(f"Auto reply send error: {e}")
+                
+        except Exception as e:
+            logger.error(f"Auto reply handler error: {e}")
+    
+    auto_reply_handlers[aid] = auto_reply_handler
+    logger.info(f"Auto reply handler set up for account {aid}")
+
+async def setup_auto_reply_all():
+    """Set up auto reply for all active accounts."""
+    for aid, client in account_clients.items():
+        try:
+            await setup_auto_reply_for_account(aid, client)
+        except Exception as e:
+            logger.error(f"Failed to setup auto reply for {aid}: {e}")
+
+async def remove_auto_reply_all():
+    """Remove auto reply handlers from all accounts."""
+    global auto_reply_handlers
+    for aid, client in account_clients.items():
+        if aid in auto_reply_handlers:
+            try:
+                client.remove_event_handler(auto_reply_handlers[aid])
+            except:
+                pass
+    auto_reply_handlers = {}
+
+# ====== GROUP SPAM LOGIC (FIXED) ======
+async def spam_worker(aid, client):
+    """Send spam messages to groups continuously."""
+    global group_spam_enabled
+    
+    acc = find_account(aid)
+    if not acc:
+        return
+    
+    logger.info(f"Spam worker started for {acc.get('name', '?')}")
+    
+    # Get target chats - from channel backup or all dialogs
+    channels = load_channel_backup()
+    target_chats = []
+    
+    # First try main channels
+    for ch in channels.get('main_channels', []):
+        try:
+            target_chats.append(int(ch['id']))
+        except:
+            target_chats.append(ch['id'])
+    
+    # If no specific channels, get all dialogs
+    if not target_chats:
+        try:
+            async for dialog in client.iter_dialogs():
+                if dialog.is_group or dialog.is_channel:
+                    target_chats.append(dialog.id)
+                if len(target_chats) >= 50:
+                    break
+        except Exception as e:
+            logger.error(f"Error fetching dialogs: {e}")
+    
+    # Fallback
+    if not target_chats:
+        logger.warning(f"No target chats for {aid}")
+        account_stats.setdefault(aid, {})['spam_running'] = False
+        return
+    
+    # Speed configuration
+    speed_config = {
+        'super_fast': (0.3, 0.8),
+        'fast': (1, 2),
+        'medium': (3, 6),
+        'slow': (8, 15)
+    }
+    speed = get_setting('spam_speed', 'medium')
+    min_wait, max_wait = speed_config.get(speed, (3, 6))
+    
+    # Load messages
+    messages = load_spam_messages()
+    if not messages:
+        messages = [{"text": "Hello! 👋 This is an automated message."}]
+    
+    msg_idx = 0
+    chat_idx = 0
+    failed_chats = []
+    
+    account_stats.setdefault(aid, {})['spam_running'] = True
+    account_stop_flags[aid] = False
+    
+    while group_spam_enabled and not account_stop_flags.get(aid, False):
+        try:
+            # Refresh target chats list (remove failed ones)
+            target_chats = [c for c in target_chats if c not in failed_chats]
+            
+            if not target_chats:
+                logger.warning(f"No target chats left for {aid}")
+                break
+            
+            chat_id = target_chats[chat_idx % len(target_chats)]
+            msg_text = messages[msg_idx % len(messages)]['text']
+            
+            try:
+                await client.send_message(int(chat_id) if isinstance(chat_id, str) and chat_id.lstrip('-').isdigit() else chat_id, msg_text)
+                account_stats[aid]['spam_sent'] = account_stats[aid].get('spam_sent', 0) + 1
+                
+                msg_idx += 1
+                chat_idx += 1
+                
+                # Random delay based on speed
+                await asyncio.sleep(random.uniform(min_wait, max_wait))
+                
+            except FloodWaitError as e:
+                wait_seconds = e.seconds if hasattr(e, 'seconds') else 60
+                logger.warning(f"Flood wait {wait_seconds}s for {aid}")
+                await asyncio.sleep(wait_seconds + 5)
+                
+            except Exception as e:
+                error_str = str(e)
+                if "FORBIDDEN" in error_str or "USER_BANNED" in error_str or "CHANNEL_PRIVATE" in error_str:
+                    # Account was kicked or banned from this chat
+                    failed_chats.append(chat_id)
+                    logger.info(f"Removed chat {chat_id} from target list for {aid}")
+                    
+                    # Try to use backup channel
+                    if channels.get('backup_channels'):
+                        bk = channels['backup_channels'][0]
+                        try:
+                            await client(functions.channels.JoinChannelRequest(channel=bk['id']))
+                            target_chats.append(bk['id'])
+                            channels['active_channel'] = bk
+                            save_channel_backup(channels)
+                            logger.info(f"Joined backup channel {bk.get('title', '?')}")
+                        except:
+                            pass
+                    
+                    chat_idx += 1
+                    await asyncio.sleep(3)
+                    
+                elif "FLOOD_WAIT" in error_str:
+                    import re as re_mod
+                    match = re_mod.search(r'(\d+)', error_str)
+                    wait_sec = int(match.group(1)) if match else 60
+                    await asyncio.sleep(wait_sec + 5)
+                    
+                else:
+                    logger.error(f"Spam send error for {aid}: {error_str[:100]}")
+                    chat_idx += 1
+                    await asyncio.sleep(10)
+        
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Spam worker loop error {aid}: {e}")
+            await asyncio.sleep(15)
+    
+    account_stats.setdefault(aid, {})['spam_running'] = False
+    logger.info(f"Spam worker stopped for {acc.get('name', '?')}")
+
+async def start_spam_all():
+    """Start spam workers for all active accounts."""
+    global group_spam_enabled, spam_worker_tasks
+    
+    group_spam_enabled = True
+    
+    for aid, client in account_clients.items():
+        if aid not in spam_worker_tasks or spam_worker_tasks[aid].done():
+            task = asyncio.create_task(spam_worker(aid, client))
+            spam_worker_tasks[aid] = task
+            await asyncio.sleep(1)  # Stagger starts
+    
+    logger.info(f"Started spam for {len(spam_worker_tasks)} accounts")
+
+async def stop_spam_all():
+    """Stop all spam workers."""
+    global group_spam_enabled, spam_worker_tasks
+    
+    group_spam_enabled = False
+    
+    for aid in spam_worker_tasks:
+        if not spam_worker_tasks[aid].done():
+            spam_worker_tasks[aid].cancel()
+    
+    # Also set stop flags
+    for aid in account_stop_flags:
+        account_stop_flags[aid] = True
+    
+    await asyncio.sleep(2)
+    
+    # Wait for tasks to finish
+    for aid in list(spam_worker_tasks.keys()):
+        try:
+            await spam_worker_tasks[aid]
+        except:
+            pass
+    
+    spam_worker_tasks = {}
+    logger.info("All spam workers stopped")
+
 # ====== BACKGROUND TASKS ======
 async def keepalive_loop():
     """Keep accounts alive by periodic ping."""
@@ -590,6 +879,9 @@ async def keepalive_loop():
                             nc = await start_account(acc)
                             if nc:
                                 account_clients[aid] = nc
+                                # Re-setup auto reply if enabled
+                                if auto_reply_enabled:
+                                    await setup_auto_reply_for_account(aid, nc)
                                 logger.info(f"Reconnected {aid}")
                         except:
                             pass
@@ -661,7 +953,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== BUTTON CALLBACK HANDLER ======
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled, account_id_counter, account_clients, active_accounts, account_stats, account_stop_flags, account_keepalive_tasks, account_spam_tasks, customer_count
+    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled, account_id_counter, account_clients, active_accounts, account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active, customer_count
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -710,6 +1002,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = "চালু ✅" if ad_data["enabled"] else "বন্ধ ❌"
         await query.edit_message_text(f"⏰ অটো-ডিলিট টাইমার এখন {status}!", parse_mode='Markdown')
         await asyncio.sleep(1)
+        # Go back to menu
+        data = "auto_delete_menu"
         await button_handler(update, context)
         
     elif data == "auto_delete_days_menu":
@@ -733,6 +1027,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_auto_delete_data(ad_data)
         await query.edit_message_text(f"✅ {days} দিন সেট করা হয়েছে!", parse_mode='Markdown')
         await asyncio.sleep(1)
+        data = "auto_delete_menu"
         await button_handler(update, context)
         
     elif data == "auto_delete_list":
@@ -974,6 +1269,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 account_clients[backup_acc['id']] = nc
                 account_stats[backup_acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                 account_stop_flags[backup_acc['id']] = False
+                
+                # Setup auto reply if enabled
+                if auto_reply_enabled:
+                    await setup_auto_reply_for_account(backup_acc['id'], nc)
+                
                 await query.edit_message_text(f"✅ **{backup_acc.get('name','?')}** এখন রানিং!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
         except Exception as e:
             await query.edit_message_text(f"❌ Failed: {str(e)[:100]}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
@@ -1105,10 +1405,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ar_start":
         auto_reply_enabled = True
+        await setup_auto_reply_all()  # ← FIXED
         await query.edit_message_text("✅ **অটো রিপ্লাই চালু!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
     elif data == "ar_stop":
         auto_reply_enabled = False
+        await remove_auto_reply_all()  # ← FIXED
         await query.edit_message_text("⏹️ **অটো রিপ্লাই বন্ধ!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_ar")]]))
 
     elif data == "ar_welcome":
@@ -1254,10 +1556,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "gs_start":
         group_spam_enabled = True
+        await start_spam_all()  # ← FIXED
         await query.edit_message_text("✅ স্প্যাম চালু!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
     elif data == "gs_stop":
         group_spam_enabled = False
+        await stop_spam_all()  # ← FIXED
         await query.edit_message_text("⏹️ স্প্যাম বন্ধ!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
     elif data == "gs_spd":
@@ -1322,8 +1626,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "st_bp":
         cur = get_setting('block_photo_enabled', True)
         set_setting('block_photo_enabled', not cur)
-        cur = not cur
-        bp = "🟢" if cur else "🔴"
+        bp = "🟢" if not cur else "🔴"
         fs = "🟢" if get_setting('flood_slow_mode', True) else "🔴"
         ln = "🟢" if logout_notification_enabled else "🔴"
         has_qr = "✅" if QR_CODE_FILE.exists() else "❌"
@@ -1341,9 +1644,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "st_fs":
         cur = get_setting('flood_slow_mode', True)
         set_setting('flood_slow_mode', not cur)
-        cur = not cur
         bp = "🟢" if get_setting('block_photo_enabled', True) else "🔴"
-        fs = "🟢" if cur else "🔴"
+        fs = "🟢" if not cur else "🔴"
         ln = "🟢" if logout_notification_enabled else "🔴"
         has_qr = "✅" if QR_CODE_FILE.exists() else "❌"
         txt = f"⚙️ **Settings**\n🚫 Block Photo: {bp}\n🐢 Flood Slow: {fs}\n🔔 Logout Alert: {ln}\n📷 QR Code: {has_qr}"
@@ -1440,7 +1742,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     else:
         await query.edit_message_text(f"⚠️ Unknown: {data}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
-        # ====== TEXT MESSAGE HANDLER ======
+
+
+# ====== TEXT MESSAGE HANDLER ======
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global auto_reply_enabled, group_spam_enabled, customer_count, account_clients, active_accounts, account_stats, account_stop_flags
     user_id = update.effective_user.id
@@ -1640,6 +1944,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_clients[acc['id']] = n_client
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
+                    # Setup auto reply if enabled
+                    if auto_reply_enabled:
+                        await setup_auto_reply_for_account(acc['id'], n_client)
             except:
                 pass
         except SessionPasswordNeededError:
@@ -1689,6 +1996,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     account_clients[acc['id']] = n_client
                     account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                     account_stop_flags[acc['id']] = False
+                    if auto_reply_enabled:
+                        await setup_auto_reply_for_account(acc['id'], n_client)
             except:
                 pass
         except Exception as e:
@@ -1731,6 +2040,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                         account_clients[acc['id']] = n_client
                         account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
                         account_stop_flags[acc['id']] = False
+                        if auto_reply_enabled:
+                            await setup_auto_reply_for_account(acc['id'], n_client)
                 except:
                     pass
             else:
@@ -1775,7 +2086,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(f"❌ Invalid session: {str(e)[:100]}")
         finally:
             context.user_data.pop('await', None)
-
 
     else:
         context.user_data.pop('await', None)
@@ -1867,6 +2177,10 @@ async def main():
                     logger.info(f"Loaded account: {acc.get('name')} ({acc.get('phone')})")
             except Exception as e:
                 logger.error(f"Failed to load account {acc.get('name')}: {e}")
+    
+    # Auto setup auto-reply handlers for all loaded accounts if enabled
+    if auto_reply_enabled:
+        await setup_auto_reply_all()
     
     # Start background tasks
     asyncio.create_task(auto_delete_messages_loop(app))
