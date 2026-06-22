@@ -243,7 +243,6 @@ def save_replies(data):
 
 # ====== AUTO-DELETE TIMER SYSTEM ======
 def load_auto_delete_data():
-    """Load auto-delete timer settings."""
     return load_json(AUTO_DELETE_FILE, {
         "enabled": False,
         "days": 1,
@@ -252,11 +251,9 @@ def load_auto_delete_data():
     })
 
 def save_auto_delete_data(data):
-    """Save auto-delete timer settings."""
     return save_json(AUTO_DELETE_FILE, data)
 
 def register_chat_for_auto_delete(phone, chat_id, chat_title=""):
-    """Register a chat for auto-delete tracking."""
     data = load_auto_delete_data()
     key = f"{phone}:{chat_id}"
     now = datetime.now(timezone.utc).isoformat()
@@ -271,7 +268,6 @@ def register_chat_for_auto_delete(phone, chat_id, chat_title=""):
     return True
 
 async def auto_delete_messages_loop(app=None):
-    """Background loop that checks every 30 min and deletes messages older than N days."""
     global account_clients, active_accounts
     await asyncio.sleep(60)
     while True:
@@ -280,62 +276,54 @@ async def auto_delete_messages_loop(app=None):
             if not data.get("enabled", False):
                 await asyncio.sleep(1800)
                 continue
-
             days = data.get("days", 1)
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
             deleted_count = data.get("deleted_count", 0)
             chats_to_remove = []
-
             for key, info in data["chats"].items():
                 phone = info.get("phone")
                 chat_id = info.get("chat_id")
                 last_msg_str = info.get("last_message_at")
-
                 if not last_msg_str or not phone or not chat_id:
                     continue
-
                 try:
                     last_msg_time = datetime.fromisoformat(last_msg_str)
                     if last_msg_time.tzinfo is None:
                         last_msg_time = last_msg_time.replace(tzinfo=timezone.utc)
                 except:
                     continue
-
                 if last_msg_time < cutoff:
-                    # Try to delete outgoing messages
                     try:
                         c = None
                         for ac in active_accounts:
                             if ac.get('phone') == phone and ac['id'] in account_clients:
                                 c = account_clients[ac['id']]
                                 break
-                        
                         if c:
                             try:
                                 async for msg in c.iter_messages(int(chat_id), limit=100):
-                                    if msg and msg.out and msg.date and msg.date.replace(tzinfo=timezone.utc) if msg.date.tzinfo is None else msg.date < cutoff:
-                                        try:
-                                            await c.delete_messages(int(chat_id), [msg.id])
-                                            deleted_count += 1
-                                            await asyncio.sleep(0.5)
-                                        except:
-                                            pass
+                                    if msg and msg.out and msg.date:
+                                        msg_date = msg.date
+                                        if msg_date.tzinfo is None:
+                                            msg_date = msg_date.replace(tzinfo=timezone.utc)
+                                        if msg_date < cutoff:
+                                            try:
+                                                await c.delete_messages(int(chat_id), [msg.id])
+                                                deleted_count += 1
+                                                await asyncio.sleep(0.5)
+                                            except:
+                                                pass
                             except Exception as e:
                                 logger.debug(f"Fetch error {chat_id}: {e}")
                     except:
                         pass
-
                     chats_to_remove.append(key)
-
             for key in chats_to_remove:
                 data["chats"].pop(key, None)
-
             data["deleted_count"] = deleted_count
             save_auto_delete_data(data)
-
         except Exception as e:
             logger.error(f"Auto-delete loop error: {e}")
-
         await asyncio.sleep(1800)
 
 # ====== ENCRYPTION ======
@@ -365,8 +353,7 @@ def decrypt_data(data: str) -> str:
             return base64.b64decode(data.encode()).decode()
         except:
             return data
-
-# ====== CLIENT MANAGEMENT ======
+            # ====== CLIENT MANAGEMENT ======
 async def create_client(phone, session_name=None):
     if session_name is None:
         session_name = f"session_{phone}"
@@ -597,7 +584,6 @@ async def keepalive_loop():
                         except:
                             pass
                         del account_clients[aid]
-                    # Try to reconnect
                     acc = find_account(aid)
                     if acc:
                         try:
@@ -724,7 +710,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = "চালু ✅" if ad_data["enabled"] else "বন্ধ ❌"
         await query.edit_message_text(f"⏰ অটো-ডিলিট টাইমার এখন {status}!", parse_mode='Markdown')
         await asyncio.sleep(1)
-        await button_handler(update, context)  # Recall with same update
+        await button_handler(update, context)
         
     elif data == "auto_delete_days_menu":
         kb = [
@@ -953,7 +939,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "ac_bk_del":
         ba = get_backup_accounts()
         if not ba:
-            await query.edit_message_text("❌ কোনো ব্যাকআপ নেই!", reply_markup=InlineKeyboardMarkup([[InlineButton("🔙 পিছনে", callback_data="ac_bk")]]))
+            await query.edit_message_text("❌ কোনো ব্যাকআপ নেই!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")]]))
             return
         kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"acbkd_{a['id']}")] for a in ba]
         kb.append([InlineKeyboardButton("🔙 পিছনে", callback_data="ac_bk")])
@@ -978,7 +964,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not backup_acc:
             await query.edit_message_text("❌ অ্যাকাউন্ট খুঁজে পাইনি!")
             return
-        # Process backup to running
         backup_acc['is_backup'] = False
         add_account_data(backup_acc)
         remove_account_data(bid)
@@ -1098,7 +1083,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_setting('channel_backup_enabled', not cur)
         status = "🟢 চালু" if not cur else "🔴 বন্ধ"
         await query.edit_message_text(f"✅ চ্যানেল ব্যাকআপ {status} হয়েছে!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_channel")]]))
-    
+
     # ====== AUTO REPLY ======
     elif data == "m_ar":
         running = sum(1 for a in active_accounts if a.get('enabled', True))
@@ -1266,13 +1251,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
-        elif data == "gs_start":
-        global group_spam_enabled
+
+    elif data == "gs_start":
         group_spam_enabled = True
         await query.edit_message_text("✅ স্প্যাম চালু!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
     elif data == "gs_stop":
-        global group_spam_enabled
         group_spam_enabled = False
         await query.edit_message_text("⏹️ স্প্যাম বন্ধ!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 পিছনে", callback_data="m_gs")]]))
 
@@ -1362,7 +1346,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fs = "🟢" if cur else "🔴"
         ln = "🟢" if logout_notification_enabled else "🔴"
         has_qr = "✅" if QR_CODE_FILE.exists() else "❌"
-        txt = f"⚙️ **Settings**\n🚫 Block Phone: {bp}\n🐢 Flood Slow: {fs}\n🔔 Logout Alert: {ln}\n📷 QR Code: {has_qr}"
+        txt = f"⚙️ **Settings**\n🚫 Block Photo: {bp}\n🐢 Flood Slow: {fs}\n🔔 Logout Alert: {ln}\n📷 QR Code: {has_qr}"
         kb = [
             [InlineKeyboardButton(f"🚫 Block Photo {bp}", callback_data="st_bp")],
             [InlineKeyboardButton(f"🐢 Flood Slow {fs}", callback_data="st_fs")],
@@ -1374,7 +1358,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "st_ln":
-        global logout_notification_enabled
         logout_notification_enabled = not logout_notification_enabled
         bp = "🟢" if get_setting('block_photo_enabled', True) else "🔴"
         fs = "🟢" if get_setting('flood_slow_mode', True) else "🔴"
@@ -1457,9 +1440,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     else:
         await query.edit_message_text(f"⚠️ Unknown: {data}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
-
-
-# ====== TEXT MESSAGE HANDLER ======
+        # ====== TEXT MESSAGE HANDLER ======
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global auto_reply_enabled, group_spam_enabled, customer_count, account_clients, active_accounts, account_stats, account_stop_flags
     user_id = update.effective_user.id
