@@ -8,6 +8,7 @@ All problems solved:
 4. Start All actually starts auto reply
 5. FIXED: SendTypingAction & UpdateStatusRequest import errors resolved
 6. Welcome: 1st = msg+pic, 2nd = msg only
+7. FIXED: Image/QR upload support - send photo directly or use URL
 """
 
 import os, sys, json, asyncio, random, logging, threading, time
@@ -133,7 +134,7 @@ DEFAULT_SETTINGS = {
     'media_keyword_reply': 'Payment first baby 😘🔥',
     'offline_keyword_reply': 'Online only baby 😊',
     'greeting_replies': ['Hi baby, ready! 🔥', 'Hey baby! 😘', 'Hello! What you need? 🔥'],
-    'default_replies': ['Ready baby! Pay karo! 🔥', 'Main ready hoon! 😘', 'Service ready! 💯']
+    'default_replies': ['Ready baby! Pay karo! 🔥', 'Main ready hoon! 😘', 'Service ready! 💯'],
 }
 
 # ============ PERSISTENCE HELPERS ============
@@ -662,13 +663,25 @@ async def send_payment_info(client, chat_id, event):
     if paytm:
         payment_msg += f"💳 PayTm: {paytm}\n"
     payment_msg += f"\n{get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')}"
-    if qr_path and Path(qr_path).exists():
+    
+    # Send QR if exists (local file or URL)
+    if qr_path:
         try:
-            await client.send_file(chat_id, qr_path, caption=payment_msg)
-            return
+            if qr_path.startswith('http://') or qr_path.startswith('https://'):
+                # It's a URL - send as text with URL (Telethon can't send URL as file directly)
+                payment_msg = f"**💰 Payment 💰**\n\n"
+                if upi: payment_msg += f"📱 UPI: {upi}\n"
+                if paytm: payment_msg += f"💳 PayTm: {paytm}\n"
+                payment_msg += f"\n📷 QR: {qr_path}\n\n{get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')}"
+                await send_with_typing(client, chat_id, payment_msg)
+            elif Path(qr_path).exists():
+                await client.send_file(chat_id, qr_path, caption=payment_msg)
+            else:
+                await send_with_typing(client, chat_id, payment_msg)
         except:
-            pass
-    await send_with_typing(client, chat_id, payment_msg)
+            await send_with_typing(client, chat_id, payment_msg)
+    else:
+        await send_with_typing(client, chat_id, payment_msg)
 
 async def block_user_and_delete_photos(event, client, uid):
     try:
@@ -1246,7 +1259,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "gs_cw":
         context.user_data['await'] = 'gs_cw'
         await query.edit_message_text(f"🔄 **Cycle Wait**\nCurrent: {get_setting('spam_cycle_wait', 30)}s\n\nEnter (0-300):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
-    
+
     elif data == "gs_msg":
         msgs = load_spam_messages()
         txt = "💬 **Spam Messages**\n\n"
@@ -1263,11 +1276,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Back", callback_data="m_gs")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data == "gs_msg_add":
         context.user_data['await'] = 'gs_msg_add'
         await query.edit_message_text("📝 **Enter new spam message:**\n\nType the message:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
-    
+
     elif data == "gs_msg_list":
         msgs = load_spam_messages()
         txt = "📋 **All Spam Messages**\n\n"
@@ -1277,7 +1290,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             txt += "No custom messages. Using default.\n"
         await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
-    
+
     elif data == "gs_msg_del":
         msgs = load_spam_messages()
         if not msgs:
@@ -1286,7 +1299,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton(f"🗑️ {m['text'][:20]}...", callback_data=f"gsmd_{m['id']}")] for m in msgs[:10]]
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="gs_msg")])
         await query.edit_message_text("Select to delete:", reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data.startswith("gsmd_"):
         mid = int(data.split('_')[1])
         delete_spam_message(mid)
@@ -1295,7 +1308,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             acc_id = acc['id']
             account_spam_messages[acc_id] = [m['text'] for m in msgs]
         await query.edit_message_text("✅ Deleted!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
-    
+
     elif data == "gs_st":
         txt = "📊 **Performance**\n\n"
         for a in active_accounts:
@@ -1303,7 +1316,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             r = "🟢 RUN" if account_stats.get(a['id'], {}).get('spam_running', False) else "🔴 STOP"
             txt += f"{r} {a.get('name', '?')}: {s}\n"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
-    
+
     elif data == "m_acc":
         ma = len(get_main_accounts())
         ba = len(get_backup_accounts())
@@ -1319,15 +1332,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏠 Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data == "ac_ph":
         context.user_data['await'] = 'ac_ph'
         await query.edit_message_text("📱 **Enter phone number**\n\nInternational format:\n`+8801XXXXXXXXX`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
-    
+
     elif data == "ac_ss":
         context.user_data['await'] = 'ac_ss'
         await query.edit_message_text("🔑 **Paste Session String**\n\nGenerate:\n`pip install telethon`\n`python -c \"from telethon.sync import TelegramClient; from telethon.sessions import StringSession; c=TelegramClient(StringSession(), API_ID, 'API_HASH'); c.start(); print(c.session.save())\"`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
-    
+
     elif data == "ac_del":
         all_a = get_all_accounts()
         if not all_a:
@@ -1336,7 +1349,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} | {a.get('phone','N/A')}", callback_data=f"acd_{a['id']}")] for a in all_a]
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_acc")])
         await query.edit_message_text("🗑️ **Delete Account:**", reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data.startswith("acd_"):
         aid = data.split('_', 1)[1]
         a = find_account(aid)
@@ -1368,7 +1381,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             remove_account_data(aid)
         await query.edit_message_text(f"✅ {name} permanently deleted!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
         return
-    
+
     elif data == "ac_bk":
         ba = get_backup_accounts()
         txt = f"💾 **Backup Accounts**\nTotal: {len(ba)}\n\nAuto-used when main banned.\n\n"
@@ -1380,11 +1393,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Back", callback_data="m_acc")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data == "ac_bk_add":
         context.user_data['await'] = 'ac_bk_ss'
         await query.edit_message_text("🔑 **Backup Session String**\n\nPaste:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
-    
+
     elif data == "ac_bk_del":
         ba = get_backup_accounts()
         if not ba:
@@ -1393,12 +1406,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"acbkd_{a['id']}")] for a in ba]
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="ac_bk")])
         await query.edit_message_text("🗑️ **Remove Backup:**", reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data.startswith("acbkd_"):
         bid = data.split('_')[1]
         remove_account_data(bid)
         await query.edit_message_text(f"✅ Backup removed!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
-    
+
     elif data == "ac_pr":
         if not active_accounts:
             await query.edit_message_text("❌ No active accounts!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
@@ -1406,13 +1419,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton(f"👤 {a.get('name','?')[:15]} {'🟢' if a.get('proxy') else '🔴'}", callback_data=f"acpr_{a['id']}")] for a in active_accounts[:10]]
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_acc")])
         await query.edit_message_text("🔌 **Set Proxy per Account**", reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data.startswith("acpr_"):
         aid = data.split('_')[1]
         context.user_data['pr_aid'] = aid
         context.user_data['await'] = 'proxy'
         await query.edit_message_text("🔌 **Proxy format**\n`type:ip:port:user:pass`\n\nEx: `socks5:1.2.3.4:1080:user:pass`\n\nType `remove` to clear", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_pr")]]))
-    
+
     elif data == "ac_ls":
         all_a = get_all_accounts()
         if not all_a:
@@ -1427,7 +1440,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             st = "🟢 ACTIVE" if any(x['id'] == a['id'] for x in active_accounts) else "🔴 INACTIVE"
             txt += f"{tp} {st} {i}. {n}\n   📱 Phone:{p} | 🆔 ID:{uid}\n"
         await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
-    
+
     elif data == "m_set":
         bp = "🟢 ON" if get_setting('block_photo_enabled', True) else "🔴 OFF"
         dr = "🟢 ON" if get_setting('default_reply_enabled', False) else "🔴 OFF"
@@ -1442,11 +1455,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏠 Menu", callback_data="main")]
         ]
         await query.edit_message_text("⚙️ **Settings**\n\nToggle options:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data == "st_bp":
         set_setting('block_photo_enabled', not get_setting('block_photo_enabled', True))
         await handle_callback(update, context)
-    
+
     elif data == "st_dr":
         cur = get_setting('default_reply_enabled', False)
         set_setting('default_reply_enabled', not cur)
@@ -1455,15 +1468,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("💬 **Enter default reply text:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
         else:
             await handle_callback(update, context)
-    
+
     elif data == "st_fs":
         set_setting('flood_slow_mode', not get_setting('flood_slow_mode', True))
         await handle_callback(update, context)
-    
+
     elif data == "st_ln":
         logout_notification_enabled = not logout_notification_enabled
         await handle_callback(update, context)
-    
+
     elif data == "st_wp":
         wm = get_setting('welcome_message', '') or "🔥 Welcome Baby!"
         wm2 = get_setting('welcome_message2', '') or "🛒 How to order?"
@@ -1474,7 +1487,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         qr = "✅ Set" if get_setting('qr_code_path', '') else "❌ Not Set"
         upi = get_setting('upi_id', '') or "Not Set"
         paytm = get_setting('paytm_num', '') or "Not Set"
-        
+
         txt = (
             "📝 **WELCOME & PRICE SETTINGS**\n\n"
             f"**1st Welcome:**\n`{wm[:40]}...`\n🖼️ Pic: {wi}\n\n"
@@ -1491,7 +1504,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Back", callback_data="m_set")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data == "st_wm":
         context.user_data['await'] = 'st_wm'
         cur = get_setting('welcome_message', '')
@@ -1499,15 +1512,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cur: txt += f"Current: `{cur}`\n"
         txt += "\nSend `remove` to clear"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "st_wi":
         context.user_data['await'] = 'st_wi'
         cur = get_setting('welcome_image', '')
-        txt = "🖼️ **1st Welcome Image**\n\nSend file path:\n"
+        txt = "🖼️ **1st Welcome Image**\n\nSend file path or URL:\n"
         if cur: txt += f"Current: `{cur}`\n"
-        txt += "\nSend `remove` to clear"
+        txt += "\n📸 Send photo directly\n🌐 Or send URL starting with http\n✏️ Or send `remove` to clear"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "st_wm2":
         context.user_data['await'] = 'st_wm2'
         cur = get_setting('welcome_message2', '')
@@ -1515,49 +1528,49 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cur: txt += f"Current: `{cur}`\n"
         txt += "\nSend `remove` to clear"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "st_wi2":
         context.user_data['await'] = 'st_wi2'
         cur = get_setting('welcome_image2', '')
-        txt = "🖼️ **2nd Welcome Image (optional)**\n\nSend file path:\n"
+        txt = "🖼️ **2nd Welcome Image (optional)**\n\nSend file path or URL:\n"
         if cur: txt += f"Current: `{cur}`\n"
-        txt += "\nSend `remove` to clear"
+        txt += "\n📸 Send photo directly\n🌐 Or send URL starting with http\n✏️ Or send `remove` to clear"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "st_pt":
         context.user_data['await'] = 'st_pt'
         cur = get_setting('price_list_text', "🔥 10 MIN VC → ₹99")
         txt = f"💰 **Set Price List Text**\n\nCurrent:\n`{cur}`\n\nSend new:"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "st_pi":
         context.user_data['await'] = 'st_pi'
         cur = get_setting('price_list_image', '')
-        txt = "🖼️ **Price List Image**\n\nSend file path:\n"
+        txt = "🖼️ **Price List Image**\n\nSend file path or URL:\n"
         if cur: txt += f"Current: `{cur}`\n"
-        txt += "\nSend `remove` to clear"
+        txt += "\n📸 Send photo directly\n🌐 Or send URL starting with http\n✏️ Or send `remove` to clear"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "st_upi":
         context.user_data['await'] = 'st_upi'
         cur = get_setting('upi_id', '')
         txt = f"📱 **UPI ID**\n\nCurrent: `{cur or 'Not Set'}`\n\nSend new UPI:\nSend `remove` to clear"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "st_paytm":
         context.user_data['await'] = 'st_paytm'
         cur = get_setting('paytm_num', '')
         txt = f"💳 **PayTm**\n\nCurrent: `{cur or 'Not Set'}`\n\nSend new:\nSend `remove` to clear"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "st_qr":
         context.user_data['await'] = 'st_qr'
         cur = get_setting('qr_code_path', '')
-        txt = "📷 **QR Code Image**\n\nSend file path:\n"
+        txt = "📷 **QR Code Image**\n\nSend file path or URL:\n"
         if cur: txt += f"Current: `{cur}`\n"
-        txt += "\nSend `remove` to clear"
+        txt += "\n📸 Send photo directly\n🌐 Or send URL starting with http\n✏️ Or send `remove` to clear"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-    
+
     elif data == "m_stat":
         ar = "🟢 ON" if auto_reply_enabled else "🔴 OFF"
         gs = "🟢 ON" if group_spam_enabled else "🔴 OFF"
@@ -1577,7 +1590,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⚡ Speed: {get_setting('spam_speed', 'medium')}"
         )
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="m_stat")], [InlineKeyboardButton("🏠 Menu", callback_data="main")]]))
-    
+
     elif data == "m_adm":
         txt = f"🔐 **Admin Panel**\n\n👑 Owner: {OWNER_ID}\n👥 Admins: {len(admins)-1}\n\n"
         for a in admins:
@@ -1590,11 +1603,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id != OWNER_ID:
             kb = [[InlineKeyboardButton("🏠 Menu", callback_data="main")]]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data == "ad_add" and user_id == OWNER_ID:
         context.user_data['await'] = 'ad_add'
         await query.edit_message_text("👤 **Enter user ID:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
-    
+
     elif data == "ad_del" and user_id == OWNER_ID:
         if len(admins) <= 1:
             await query.edit_message_text("❌ Only owner left!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
@@ -1602,22 +1615,76 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton(f"🗑️ `{a}`", callback_data=f"addc_{a}")] for a in admins if a != OWNER_ID]
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_adm")])
         await query.edit_message_text("Select to remove:", reply_markup=InlineKeyboardMarkup(kb))
-    
+
     elif data.startswith("addc_") and user_id == OWNER_ID:
         aid = int(data.split('_')[1])
         if aid in admins and aid != OWNER_ID:
             admins.remove(aid)
             await query.edit_message_text(f"✅ {aid} removed!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
-    
+
     elif data == "rt_exact":
         context.user_data['rt'] = 'exact'
         await query.edit_message_text("✅ Match: **exact**\nNow send the reply text:")
         context.user_data['await'] = 'rt'
-    
+
     elif data == "rt_cont":
         context.user_data['rt'] = 'contains'
         await query.edit_message_text("✅ Match: **contains**\nNow send the reply text:")
-        # ============ TEXT HANDLER ============
+        context.user_data['await'] = 'rt'
+        # ============ TEXT & PHOTO HANDLER ============
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photo uploads for QR code, welcome images, etc."""
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID and user_id not in admins:
+        return
+    aw = context.user_data.get('await')
+    if not aw:
+        return
+
+    # Download the photo
+    photo_file = await update.message.photo[-1].get_file()
+    timestamp = int(time.time())
+
+    if aw == 'st_qr':
+        file_path = str(PAYMENT_ASSETS_DIR / f"qr_code_{timestamp}.jpg")
+        await photo_file.download_to_drive(file_path)
+        set_setting('qr_code_path', file_path)
+        await update.message.reply_text("✅ **QR Code image saved!** ✅\n\nPhoto uploaded & stored successfully.\nWill be sent automatically for payment queries.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+
+    elif aw == 'st_wi':
+        file_path = str(PAYMENT_ASSETS_DIR / f"welcome1_{timestamp}.jpg")
+        await photo_file.download_to_drive(file_path)
+        set_setting('welcome_image', file_path)
+        await update.message.reply_text("✅ **1st Welcome Image saved!** ✅\n\nWill be sent with 1st welcome message.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+
+    elif aw == 'st_wi2':
+        file_path = str(PAYMENT_ASSETS_DIR / f"welcome2_{timestamp}.jpg")
+        await photo_file.download_to_drive(file_path)
+        set_setting('welcome_image2', file_path)
+        await update.message.reply_text("✅ **2nd Welcome Image saved!** ✅",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+
+    elif aw == 'st_pi':
+        file_path = str(PAYMENT_ASSETS_DIR / f"price_{timestamp}.jpg")
+        await photo_file.download_to_drive(file_path)
+        set_setting('price_list_image', file_path)
+        await update.message.reply_text("✅ **Price List Image saved!** ✅",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+
+    else:
+        await update.message.reply_text("📸 Photo received, but I wasn't expecting one right now.\nUse /start and select Settings → Welcome & Price → choose an image option first.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]))
+        return
+
+    context.user_data['await'] = None
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1627,7 +1694,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     aw = context.user_data.get('await')
     if not aw:
         return
-    
+
     if aw == 'seen_delay':
         try:
             v = int(text)
@@ -1639,7 +1706,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("⚠️ Number pls!")
         context.user_data['await'] = None
-    
+
     elif aw == 'typing_duration':
         try:
             v = int(text)
@@ -1651,12 +1718,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("⚠️ Number pls!")
         context.user_data['await'] = None
-    
+
     elif aw == 'ignore':
         set_setting('ignored_messages', text)
         await update.message.reply_text("✅ Ignored messages updated!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'rk':
         context.user_data['rk'] = text
         context.user_data['await'] = 'rt'
@@ -1665,14 +1732,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("✅ Contains", callback_data="rt_cont")],
             [InlineKeyboardButton("❌ Cancel", callback_data="ar_rp")]
         ]))
-    
+
     elif aw == 'rt':
         kw = context.user_data.get('rk', '')
         tp = context.user_data.get('rt', 'contains')
         rid = add_reply(kw, text, tp)
         await update.message.reply_text(f"✅ Reply added! (ID: {rid})", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_rp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'rb':
         data_list = []
         for line in text.strip().split('\n'):
@@ -1690,7 +1757,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = "❌ No valid replies!\n\nFormat: `keyword | reply | exact/contains`"
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_rp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'gs_bs':
         try:
             v = int(text)
@@ -1702,7 +1769,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("⚠️ Number!")
         context.user_data['await'] = None
-    
+
     elif aw == 'gs_bd':
         try:
             v = int(text)
@@ -1714,7 +1781,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("⚠️ Number!")
         context.user_data['await'] = None
-    
+
     elif aw == 'gs_cw':
         try:
             v = int(text)
@@ -1726,7 +1793,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("⚠️ Number!")
         context.user_data['await'] = None
-    
+
     elif aw == 'gs_msg_add':
         add_spam_message(text)
         msgs = load_spam_messages()
@@ -1735,12 +1802,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             account_spam_messages[acc_id] = [m['text'] for m in msgs]
         await update.message.reply_text(f"✅ Message added!\n\n{text}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'dr_txt':
         set_setting('default_reply_text', text)
         await update.message.reply_text("✅ Default reply text set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'ad_add':
         try:
             aid = int(text.strip())
@@ -1752,7 +1819,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("⚠️ Valid ID pls!")
         context.user_data['await'] = None
-    
+
     elif aw == 'ac_ph':
         phone = text.strip()
         if not phone.startswith('+'):
@@ -1768,7 +1835,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text(f"❌ {str(e)[:80]}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
             context.user_data['await'] = None
-    
+
     elif aw == 'ac_otp':
         code = text.strip()
         phone = context.user_data.get('ac_ph', '')
@@ -1782,7 +1849,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await sign_in_with_2fa(code, client, update, context, phone)
         else:
             await sign_in_with_code(phone, code, client, update, context)
-    
+
     elif aw in ['ac_ss', 'ac_bk_ss']:
         ss = text.strip()
         is_backup = (aw == 'ac_bk_ss')
@@ -1814,7 +1881,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(f"❌ Invalid session!\nError: {name}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'proxy':
         aid = context.user_data.get('pr_aid', '')
         if text.lower() == 'remove':
@@ -1857,7 +1924,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Invalid format!")
         context.user_data['await'] = None
         context.user_data['pr_aid'] = None
-    
+
     # === Welcome & Price Settings Handlers ===
     elif aw == 'st_wm':
         if text.lower() == 'remove':
@@ -1867,20 +1934,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             set_setting('welcome_message', text)
             await update.message.reply_text(f"✅ 1st Welcome set!\n\n`{text[:50]}...`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'st_wi':
         if text.lower() == 'remove':
             set_setting('welcome_image', '')
             await update.message.reply_text("✅ 1st Welcome image cleared!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        elif text.startswith('http://') or text.startswith('https://'):
+            # Save as URL
+            set_setting('welcome_image', text.strip())
+            await update.message.reply_text(f"✅ 1st Welcome image URL set!\n\nURL: `{text[:60]}...`\n\nNote: Telegram may not display remote URLs. Send photo directly for best results.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         else:
+            # Try local file path
             fp = text.strip()
             if Path(fp).exists():
                 set_setting('welcome_image', fp)
-                await update.message.reply_text(f"✅ 1st Welcome image set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+                await update.message.reply_text(f"✅ 1st Welcome image set from path!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
             else:
-                await update.message.reply_text("❌ File not found!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+                await update.message.reply_text("❌ File not found! Send a photo directly (recommended) or use a URL starting with http://",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'st_wm2':
         if text.lower() == 'remove':
             set_setting('welcome_message2', '')
@@ -1889,38 +1963,46 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             set_setting('welcome_message2', text)
             await update.message.reply_text(f"✅ 2nd Welcome set!\n\n`{text[:50]}...`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'st_wi2':
         if text.lower() == 'remove':
             set_setting('welcome_image2', '')
             await update.message.reply_text("✅ 2nd Welcome image cleared!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        elif text.startswith('http://') or text.startswith('https://'):
+            set_setting('welcome_image2', text.strip())
+            await update.message.reply_text(f"✅ 2nd Welcome image URL set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         else:
             fp = text.strip()
             if Path(fp).exists():
                 set_setting('welcome_image2', fp)
                 await update.message.reply_text(f"✅ 2nd Welcome image set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
             else:
-                await update.message.reply_text("❌ File not found!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+                await update.message.reply_text("❌ File not found! Send photo directly or use URL.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'st_pt':
         set_setting('price_list_text', text)
         await update.message.reply_text(f"✅ Price list set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'st_pi':
         if text.lower() == 'remove':
             set_setting('price_list_image', '')
             await update.message.reply_text("✅ Price image cleared!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        elif text.startswith('http://') or text.startswith('https://'):
+            set_setting('price_list_image', text.strip())
+            await update.message.reply_text(f"✅ Price image URL set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         else:
             fp = text.strip()
             if Path(fp).exists():
                 set_setting('price_list_image', fp)
                 await update.message.reply_text(f"✅ Price image set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
             else:
-                await update.message.reply_text("❌ File not found!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+                await update.message.reply_text("❌ File not found! Send photo directly or use URL.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'st_upi':
         if text.lower() == 'remove':
             set_setting('upi_id', '')
@@ -1929,7 +2011,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             set_setting('upi_id', text.strip())
             await update.message.reply_text(f"✅ UPI set: `{text.strip()}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'st_paytm':
         if text.lower() == 'remove':
             set_setting('paytm_num', '')
@@ -1938,20 +2020,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             set_setting('paytm_num', text.strip())
             await update.message.reply_text(f"✅ PayTm set: `{text.strip()}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     elif aw == 'st_qr':
         if text.lower() == 'remove':
             set_setting('qr_code_path', '')
             await update.message.reply_text("✅ QR cleared!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        elif text.startswith('http://') or text.startswith('https://'):
+            set_setting('qr_code_path', text.strip())
+            await update.message.reply_text(f"✅ QR URL set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         else:
             fp = text.strip()
             if Path(fp).exists():
                 set_setting('qr_code_path', fp)
-                await update.message.reply_text(f"✅ QR set!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+                await update.message.reply_text(f"✅ QR set from path!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
             else:
-                await update.message.reply_text("❌ File not found!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+                await update.message.reply_text("❌ File not found!\n\n📸 **Send the QR photo directly** (recommended)\n🌐 Or use a URL starting with http://\n✏️ Or type `remove` to clear",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
         context.user_data['await'] = None
-    
+
     else:
         await update.message.reply_text("❓ Unknown command. Use /start")
         context.user_data['await'] = None
@@ -1962,14 +2048,17 @@ async def setup_and_run():
     logger.info("=" * 50)
     logger.info("STARTING TELEGRAM BOT - FIXED VERSION")
     logger.info("=" * 50)
-    
+
     _load_settings_to_cache()
     _load_replies_to_cache()
-    
+
     logger.info("Setting up Python-Telegram-Bot...")
     ptb_application = Application.builder().token(BOT_TOKEN).concurrent_updates(True).read_timeout(30).write_timeout(30).connect_timeout(30).build()
+
+    # Register handlers
     ptb_application.add_handler(CommandHandler("start", start_command))
     ptb_application.add_handler(CallbackQueryHandler(handle_callback))
+    ptb_application.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # Photo upload handler
     ptb_application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1991,10 +2080,10 @@ async def setup_and_run():
     logger.info("Setting up auto-reply accounts...")
     await setup_auto_reply()
     logger.info(f"Active accounts: {len(active_accounts)}")
-    
+
     asyncio.create_task(check_account_status_periodically())
     logger.info("Account status checker started (instant logout detection)")
-    
+
     bot_ready = True
     logger.info("BOT IS READY! All fixes applied!")
 
@@ -2010,11 +2099,11 @@ async def shutdown_bot():
     logger.info("Shutting down bot...")
     bot_ready = False
     stop_spam()
-    
+
     for task in account_keepalive_tasks.values():
         task.cancel()
     account_keepalive_tasks.clear()
-    
+
     for acc_id, client in list(account_clients.items()):
         try:
             await client.disconnect()
