@@ -1360,7 +1360,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         logger.info(f"Account {name} ({aid}) permanently deleted!")
         await query.edit_message_text(f"✅ {name} permanently deleted!\n\nRemoved from system successfully.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
-        elif data == "ac_bk":
+        return
+    
+    elif data == "ac_bk":
         ba = get_backup_accounts()
         txt = f"💾 **Backup Accounts**\nTotal: {len(ba)}\n\nAuto-used when main banned.\n\n"
         for i, a in enumerate(ba, 1):
