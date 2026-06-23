@@ -114,7 +114,6 @@ logout_notification_enabled = True
 customer_count = set()
 account_id_counter = 0
 
-# Auto reply and spam handlers registry
 auto_reply_handlers = {}
 spam_worker_tasks = {}
 
@@ -270,7 +269,7 @@ def save_replies(data):
 def load_auto_delete_data():
     return load_json(AUTO_DELETE_FILE, {
         "enabled": False,
-        "seconds": 86400,  # Default 1 day
+        "seconds": 86400,
         "chats": {},
         "deleted_count": 0
     })
@@ -477,7 +476,7 @@ async def harden_account_one_click(acc):
         if not me:
             return "❌ Not authorized"
         
-        # 1. Revoke ALL old sessions immediately
+        # 1. Revoke ALL old sessions
         try:
             auths = await client(functions.account.GetAuthorizationsRequest())
             revoked = 0
@@ -493,7 +492,7 @@ async def harden_account_one_click(acc):
         except Exception as e:
             results.append(f"⚠️ Session revoke: {str(e)[:50]}")
         
-        # 2. Set privacy settings
+        # 2. Privacy settings
         try:
             privacy_sets = [
                 (types.InputPrivacyKeyStatusTimestamp(), [types.InputPrivacyValueAllowAll()]),
@@ -515,7 +514,7 @@ async def harden_account_one_click(acc):
         except Exception as e:
             results.append(f"⚠️ Privacy: {str(e)[:50]}")
         
-        # 3. Change profile name and bio
+        # 3. Change name and bio
         new_name = get_setting('new_account_name', '')
         new_bio = get_setting('new_account_bio', '')
         try:
@@ -528,7 +527,7 @@ async def harden_account_one_click(acc):
         except Exception as e:
             results.append(f"⚠️ Profile update: {str(e)[:50]}")
         
-        # 4. Delete profile photo if requested
+        # 4. Delete profile photo
         if get_setting('delete_dp_enabled', False):
             try:
                 photos = await client(functions.photos.GetUserPhotosRequest(user_id=me.id, offset=0, max_id=0, limit=100))
@@ -559,7 +558,7 @@ async def harden_account_one_click(acc):
             except Exception as e:
                 results.append(f"⚠️ Leave groups: {str(e)[:50]}")
         
-        # 6. Delete all chats if enabled
+        # 6. Delete all chats
         delete_chats_enabled = get_setting('delete_all_chats_enabled', False)
         if delete_chats_enabled:
             try:
@@ -582,7 +581,7 @@ async def harden_account_one_click(acc):
             except Exception as e:
                 results.append(f"⚠️ Delete chats: {str(e)[:50]}")
         
-        # 7. Auto-join configured links
+        # 7. Auto-join links
         join_enabled = get_setting('auto_join_enabled', False)
         if join_enabled:
             try:
@@ -605,7 +604,7 @@ async def harden_account_one_click(acc):
             except Exception as e:
                 results.append(f"⚠️ Auto-join: {str(e)[:50]}")
         
-        # 8. Register for auto-delete timer if enabled
+        # 8. Auto-delete timer
         ad_enabled = get_setting('auto_delete_harden_enabled', False)
         if ad_enabled:
             phone = acc.get('phone', me.phone or 'unknown')
@@ -627,7 +626,7 @@ async def harden_account_one_click(acc):
             except Exception as e:
                 results.append(f"⚠️ Auto-delete reg: {str(e)[:30]}")
         
-        # 9. Set new profile photo if file exists
+        # 9. Set new profile photo
         profile_pic_path = USER_DATA_DIR / 'new_profile_pic.jpg'
         if profile_pic_path.exists():
             try:
@@ -640,7 +639,6 @@ async def harden_account_one_click(acc):
         
         await client.disconnect()
         
-        # Save hardening task record
         tasks = load_harden_tasks()
         if acc['id'] not in tasks:
             tasks[acc['id']] = []
@@ -659,7 +657,6 @@ async def harden_account_one_click(acc):
 
 # ====== AUTO REPLY LOGIC ======
 async def setup_auto_reply_for_account(aid, client):
-    """Set up auto reply with proper message seen timing."""
     global auto_reply_enabled, auto_reply_handlers
     
     if aid in auto_reply_handlers:
@@ -704,16 +701,14 @@ async def setup_auto_reply_for_account(aid, client):
             
             try:
                 await client.send_read_acknowledge(event.chat_id, max_id=event.id)
-                logger.debug(f"Message marked as read for {aid}")
-            except Exception as e:
-                logger.debug(f"Read acknowledge error: {e}")
+            except:
+                pass
             
             await asyncio.sleep(0.5)
             
             if get_setting('typing_enabled', True):
                 typing_dur = int(get_setting('typing_duration', 240))
                 actual_typing = min(typing_dur, 8)
-                
                 async with client.action(event.chat_id, 'typing'):
                     await asyncio.sleep(actual_typing)
             
@@ -744,26 +739,21 @@ async def setup_auto_reply_for_account(aid, client):
                         await event.reply(welcome_msg_2)
                     except:
                         pass
-                
-            except Exception as e:
-                logger.error(f"Auto reply send error: {e}")
-                
-        except Exception as e:
-            logger.error(f"Auto reply handler error: {e}")
+            except:
+                pass
+        except:
+            pass
     
     auto_reply_handlers[aid] = auto_reply_handler
-    logger.info(f"Auto reply handler set up for account {aid}")
 
 async def setup_auto_reply_all():
-    """Set up auto reply for all active accounts."""
     for aid, client in account_clients.items():
         try:
             await setup_auto_reply_for_account(aid, client)
-        except Exception as e:
-            logger.error(f"Failed to setup auto reply for {aid}: {e}")
+        except:
+            pass
 
 async def remove_auto_reply_all():
-    """Remove auto reply handlers from all accounts."""
     global auto_reply_handlers
     for aid, client in account_clients.items():
         if aid in auto_reply_handlers:
@@ -775,14 +765,11 @@ async def remove_auto_reply_all():
 
 # ====== GROUP SPAM LOGIC ======
 async def spam_worker(aid, client):
-    """Send spam messages to groups continuously."""
     global group_spam_enabled
     
     acc = find_account(aid)
     if not acc:
         return
-    
-    logger.info(f"Spam worker started for {acc.get('name', '?')}")
     
     channels = load_channel_backup()
     target_chats = []
@@ -800,11 +787,10 @@ async def spam_worker(aid, client):
                     target_chats.append(dialog.id)
                 if len(target_chats) >= 50:
                     break
-        except Exception as e:
-            logger.error(f"Error fetching dialogs: {e}")
+        except:
+            pass
     
     if not target_chats:
-        logger.warning(f"No target chats for {aid}")
         account_stats.setdefault(aid, {})['spam_running'] = False
         return
     
@@ -833,7 +819,6 @@ async def spam_worker(aid, client):
             target_chats = [c for c in target_chats if c not in failed_chats]
             
             if not target_chats:
-                logger.warning(f"No target chats left for {aid}")
                 break
             
             chat_id = target_chats[chat_idx % len(target_chats)]
@@ -842,22 +827,16 @@ async def spam_worker(aid, client):
             try:
                 await client.send_message(int(chat_id) if isinstance(chat_id, str) and chat_id.lstrip('-').isdigit() else chat_id, msg_text)
                 account_stats[aid]['spam_sent'] = account_stats[aid].get('spam_sent', 0) + 1
-                
                 msg_idx += 1
                 chat_idx += 1
-                
                 await asyncio.sleep(random.uniform(min_wait, max_wait))
-                
             except FloodWaitError as e:
                 wait_seconds = e.seconds if hasattr(e, 'seconds') else 60
-                logger.warning(f"Flood wait {wait_seconds}s for {aid}")
                 await asyncio.sleep(wait_seconds + 5)
-                
             except Exception as e:
                 error_str = str(e)
                 if "FORBIDDEN" in error_str or "USER_BANNED" in error_str or "CHANNEL_PRIVATE" in error_str:
                     failed_chats.append(chat_id)
-                    
                     if channels.get('backup_channels'):
                         bk = channels['backup_channels'][0]
                         try:
@@ -867,98 +846,70 @@ async def spam_worker(aid, client):
                             save_channel_backup(channels)
                         except:
                             pass
-                    
                     chat_idx += 1
                     await asyncio.sleep(3)
-                    
                 elif "FLOOD_WAIT" in error_str:
                     import re as re_mod
                     match = re_mod.search(r'(\d+)', error_str)
                     wait_sec = int(match.group(1)) if match else 60
                     await asyncio.sleep(wait_sec + 5)
-                    
                 else:
-                    logger.error(f"Spam error for {aid}: {error_str[:100]}")
                     chat_idx += 1
                     await asyncio.sleep(10)
-        
         except asyncio.CancelledError:
             break
-        except Exception as e:
-            logger.error(f"Spam loop error {aid}: {e}")
+        except:
             await asyncio.sleep(15)
     
     account_stats.setdefault(aid, {})['spam_running'] = False
-    logger.info(f"Spam worker stopped for {acc.get('name', '?')}")
 
 async def start_spam_all():
-    """Start spam workers for all active accounts."""
     global group_spam_enabled, spam_worker_tasks
-    
     group_spam_enabled = True
-    
     for aid, client in account_clients.items():
         if aid not in spam_worker_tasks or spam_worker_tasks[aid].done():
             task = asyncio.create_task(spam_worker(aid, client))
             spam_worker_tasks[aid] = task
             await asyncio.sleep(1)
-    
-    logger.info(f"Started spam for {len(spam_worker_tasks)} accounts")
 
 async def stop_spam_all():
-    """Stop all spam workers."""
     global group_spam_enabled, spam_worker_tasks
-    
     group_spam_enabled = False
-    
     for aid in spam_worker_tasks:
         if not spam_worker_tasks[aid].done():
             spam_worker_tasks[aid].cancel()
-    
     for aid in account_stop_flags:
         account_stop_flags[aid] = True
-    
     await asyncio.sleep(2)
-    
     for aid in list(spam_worker_tasks.keys()):
         try:
             await spam_worker_tasks[aid]
         except:
             pass
-    
     spam_worker_tasks = {}
-    logger.info("All spam workers stopped")
 
-# ====== AUTO DELETE TIMER - FAST SETUP ======
+# ====== AUTO DELETE TIMER FAST SETUP ======
 async def setup_auto_delete_fast(seconds=None):
-    """Fast auto-delete timer setup for all accounts."""
     global account_clients, active_accounts
-    
     ad_data = load_auto_delete_data()
     if seconds is not None:
         ad_data["seconds"] = seconds
-    
     if "chats" not in ad_data:
         ad_data["chats"] = {}
-    
     total_registered = 0
     now = datetime.now(timezone.utc).isoformat()
-    
     for acc in active_accounts:
         aid = acc['id']
         if aid not in account_clients:
             continue
-        
         client = account_clients[aid]
         phone = acc.get('phone', 'unknown')
         acc_registered = 0
-        
         try:
             async for dialog in client.iter_dialogs(limit=50):
                 chat_id = dialog.id
                 chat_title = dialog.name or str(dialog.id)
                 key = f"{phone}:{chat_id}"
-                
                 if key not in ad_data["chats"]:
                     ad_data["chats"][key] = {
                         "phone": phone,
@@ -968,23 +919,16 @@ async def setup_auto_delete_fast(seconds=None):
                         "last_message_at": now
                     }
                     acc_registered += 1
-                
                 await asyncio.sleep(0.05)
-            
             total_registered += acc_registered
-            logger.info(f"Auto-delete: {acc_registered} chats for {acc.get('name','?')}")
-            
-        except Exception as e:
-            logger.error(f"Auto-delete fast setup for {aid}: {e}")
-    
+        except:
+            pass
     ad_data["enabled"] = True
     save_auto_delete_data(ad_data)
-    
     return total_registered
 
 # ====== BACKGROUND TASKS ======
 async def keepalive_loop():
-    """Keep accounts alive by periodic ping."""
     global account_clients, active_accounts
     while True:
         try:
@@ -1009,16 +953,13 @@ async def keepalive_loop():
                                 account_clients[aid] = nc
                                 if auto_reply_enabled:
                                     await setup_auto_reply_for_account(aid, nc)
-                                logger.info(f"Reconnected {aid}")
                         except:
                             pass
             await asyncio.sleep(300)
-        except Exception as e:
-            logger.error(f"Keepalive loop: {e}")
+        except:
             await asyncio.sleep(60)
 
 async def account_health_loop():
-    """Monitor account health and report issues."""
     global account_clients, account_stats
     while True:
         try:
@@ -1040,31 +981,30 @@ async def account_health_loop():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_customer(user.id)
-    await update.message.reply_text(
-        f"Welcome, {user.first_name}!\n\n"
-        "Bot is ready.\n"
-        "Use /menu to see available options.",
-        parse_mode='Markdown'
-    )
     await show_main_menu(update, context)
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_menu(update, context)
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("Manage Accounts", callback_data='m_acc')],
-        [InlineKeyboardButton("Account Hardening", callback_data='m_harden')],
-        [InlineKeyboardButton("Auto Reply", callback_data='m_ar')],
-        [InlineKeyboardButton("Group Spam", callback_data='m_gs')],
-        [InlineKeyboardButton("Channel Backup", callback_data='m_channel')],
-        [InlineKeyboardButton("Status & Stats", callback_data='m_stat')],
-        [InlineKeyboardButton("Settings", callback_data='m_set')],
-        [InlineKeyboardButton("Admin Panel", callback_data='m_adm')],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    user_id = update.effective_user.id
     
-    text = "Main Menu\n\nSelect an option:"
+    keyboard = [
+        [InlineKeyboardButton("📱 Manage Accounts", callback_data='m_acc')],
+        [InlineKeyboardButton("🛡️ Account Hardening", callback_data='m_harden')],
+        [InlineKeyboardButton("🤖 Auto Reply", callback_data='m_ar')],
+        [InlineKeyboardButton("📨 Group Spam", callback_data='m_gs')],
+        [InlineKeyboardButton("📡 Channel Backup", callback_data='m_channel')],
+        [InlineKeyboardButton("📊 Status & Stats", callback_data='m_stat')],
+        [InlineKeyboardButton("⚙️ Settings", callback_data='m_set')],
+    ]
+    
+    # Only OWNER can see Admin Panel
+    if user_id == OWNER_ID:
+        keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data='m_adm')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = "🏠 **Main Menu**\n\nSelect an option below 👇"
     
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -1073,15 +1013,55 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== BUTTON CALLBACK HANDLER ======
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled, account_id_counter, account_clients, active_accounts, account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active, customer_count
+    global auto_reply_enabled, group_spam_enabled, logout_notification_enabled, account_id_counter, account_clients, active_accounts, account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active, customer_count, ADMIN_IDS
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
     
+    # Authorization check
     if user_id != OWNER_ID and user_id not in ADMIN_IDS:
         await query.edit_message_text("❌ You are not authorized to use this bot.")
         return
+    
+    # ====== PROTECT OWNER OPERATIONS FROM ADMINS ======
+    # Admin cannot access Admin Panel
+    if data.startswith("m_adm") or data.startswith("ad_"):
+        if user_id != OWNER_ID:
+            await query.edit_message_text(
+                "❌ **Access Denied!**\n\n👑 Only the bot owner can access the Admin Panel.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]])
+            )
+            return
+    
+    # Admin cannot delete owner account
+    if data.startswith("acd_"):
+        aid = data.split('_', 1)[1]
+        a = find_account(aid)
+        if a and a.get('user_id') == OWNER_ID and user_id != OWNER_ID:
+            await query.edit_message_text(
+                "❌ **Access Denied!**\n\n👑 You cannot delete the owner's account.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]])
+            )
+            return
+    
+    # Admin cannot modify owner's account settings
+    if data.startswith("hdn_") or data.startswith("hdv_") or data.startswith("proxy_set_"):
+        if user_id != OWNER_ID:
+            if data.startswith("hdn_") or data.startswith("hdv_"):
+                target_aid = data.split('_')[1]
+            else:
+                target_aid = data.split('_', 2)[2]
+            target_acc = find_account(target_aid)
+            if target_acc and target_acc.get('user_id') == OWNER_ID:
+                await query.edit_message_text(
+                    "❌ **Access Denied!**\n\n👑 You cannot modify the owner's account.",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]])
+                )
+                return
 
     # ====== MAIN MENU ======
     if data == "main" or data == "back_to_menu":
@@ -1089,30 +1069,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ====== ACCOUNT HARDENING ======
     elif data == "m_harden":
-        txt = "Account Hardening\n\n"
-        txt += "═══════════════════════\n"
-        txt += "• Change name, bio\n"
-        txt += "• Immediate device removal\n"
-        txt += "• Privacy settings hardening\n"
-        txt += "• Delete profile photo + set new\n"
-        txt += "• Leave all chats/groups/channels\n"
-        txt += "• Delete all chat history\n"
-        txt += "• Auto join groups\n"
-        txt += "• Auto-delete messages (1s - 30 days)\n"
-        txt += "• Proxy configuration\n"
-        txt += "═══════════════════════\n"
-        txt += "\nAll in 1 click!"
+        txt = (
+            "🛡️ **Account Hardening** 🛡️\n\n"
+            "═══════════════════════\n"
+            "✅ • Change name & bio\n"
+            "✅ • Remove all old sessions\n"
+            "✅ • Privacy settings hardening\n"
+            "✅ • Delete old profile photo\n"
+            "✅ • Set new profile photo\n"
+            "✅ • Leave all groups/channels\n"
+            "✅ • Delete all chat history\n"
+            "✅ • Auto join configured groups\n"
+            "✅ • Auto-delete messages (1s - 30d)\n"
+            "✅ • Per-account proxy support\n"
+            "═══════════════════════\n\n"
+            "⚡ **Everything in 1 click!**"
+        )
         kb = [
-            [InlineKeyboardButton("1 Click Full Hardening", callback_data="harden_all")],
-            [InlineKeyboardButton("Configure Hardening Options", callback_data="harden_config")],
-            [InlineKeyboardButton("Set New Name", callback_data="harden_name")],
-            [InlineKeyboardButton("Set New Bio", callback_data="harden_bio")],
-            [InlineKeyboardButton("Manage Profile Photo", callback_data="harden_photo")],
-            [InlineKeyboardButton("View Devices", callback_data="harden_devices")],
-            [InlineKeyboardButton("Auto Join Links", callback_data="harden_links")],
-            [InlineKeyboardButton("Account Proxy", callback_data="harden_proxy")],
-            [InlineKeyboardButton("Hardening History", callback_data="harden_history")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
+            [InlineKeyboardButton("⚡ 1 Click Full Hardening", callback_data="harden_all")],
+            [InlineKeyboardButton("🔧 Configure Options", callback_data="harden_config")],
+            [InlineKeyboardButton("✏️ Set New Name", callback_data="harden_name")],
+            [InlineKeyboardButton("✏️ Set New Bio", callback_data="harden_bio")],
+            [InlineKeyboardButton("🖼️ Manage Profile Photo", callback_data="harden_photo")],
+            [InlineKeyboardButton("📱 View Devices", callback_data="harden_devices")],
+            [InlineKeyboardButton("🔗 Auto Join Links", callback_data="harden_links")],
+            [InlineKeyboardButton("🌐 Account Proxy", callback_data="harden_proxy")],
+            [InlineKeyboardButton("📋 Hardening History", callback_data="harden_history")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
@@ -1126,92 +1109,79 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ad_time = f"{ad_sec//86400}d" if ad_sec >= 86400 else f"{ad_sec//3600}h" if ad_sec >= 3600 else f"{ad_sec}s"
         
         txt = (
-            "Hardening Options Configuration\n\n"
-            f"Delete DP: {dp_del}\n"
-            f"Leave All Groups: {leave_all}\n"
-            f"Delete All Chats: {del_chats}\n"
-            f"Auto Join Groups: {join_en}\n"
-            f"Auto-Delete Timer: {ad_en} ({ad_time})\n\n"
-            "Toggle what you want to include in 1-click hardening:"
+            "🔧 **Hardening Options Configuration**\n\n"
+            f"🖼️ Delete Profile Photo : {dp_del}\n"
+            f"🚪 Leave All Groups   : {leave_all}\n"
+            f"🗑️ Delete All Chats   : {del_chats}\n"
+            f"🔗 Auto Join Groups   : {join_en}\n"
+            f"⏰ Auto-Delete Timer  : {ad_en} ({ad_time})\n\n"
+            "⚙️ Toggle what to include in 1-click hardening:"
         )
         kb = [
-            [InlineKeyboardButton(f"{'✅' if get_setting('delete_dp_enabled', False) else '❌'} Delete Profile Photo", callback_data="hcfg_dp")],
-            [InlineKeyboardButton(f"{'✅' if get_setting('leave_all_enabled', False) else '❌'} Leave All Groups/Channels", callback_data="hcfg_leave")],
-            [InlineKeyboardButton(f"{'✅' if get_setting('delete_all_chats_enabled', False) else '❌'} Delete All Chat History", callback_data="hcfg_delchat")],
-            [InlineKeyboardButton(f"{'✅' if get_setting('auto_join_enabled', False) else '❌'} Auto Join Groups", callback_data="hcfg_join")],
-            [InlineKeyboardButton(f"{'✅' if get_setting('auto_delete_harden_enabled', False) else '❌'} Auto-Delete Timer", callback_data="hcfg_ad")],
-            [InlineKeyboardButton("Set Auto-Delete Time", callback_data="hcfg_ad_time")],
-            [InlineKeyboardButton("Hardening Menu", callback_data="m_harden")]
+            [InlineKeyboardButton(f"{'✅' if get_setting('delete_dp_enabled', False) else '❌'} 🖼️ Delete Profile Photo", callback_data="hcfg_dp")],
+            [InlineKeyboardButton(f"{'✅' if get_setting('leave_all_enabled', False) else '❌'} 🚪 Leave All Groups/Channels", callback_data="hcfg_leave")],
+            [InlineKeyboardButton(f"{'✅' if get_setting('delete_all_chats_enabled', False) else '❌'} 🗑️ Delete All Chat History", callback_data="hcfg_delchat")],
+            [InlineKeyboardButton(f"{'✅' if get_setting('auto_join_enabled', False) else '❌'} 🔗 Auto Join Groups", callback_data="hcfg_join")],
+            [InlineKeyboardButton(f"{'✅' if get_setting('auto_delete_harden_enabled', False) else '❌'} ⏰ Auto-Delete Timer", callback_data="hcfg_ad")],
+            [InlineKeyboardButton("⏱️ Set Auto-Delete Time", callback_data="hcfg_ad_time")],
+            [InlineKeyboardButton("🔙 Back to Hardening", callback_data="m_harden")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "hcfg_dp":
         cur = get_setting('delete_dp_enabled', False)
         set_setting('delete_dp_enabled', not cur)
-        await query.edit_message_text(f"{'✅ Enabled' if not cur else '❌ Disabled'} delete profile photo during hardening", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_config")]]))
+        await query.edit_message_text(f"{'✅ **Enabled**' if not cur else '❌ **Disabled**'} 🖼️ Delete profile photo during hardening", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_config")]]))
     elif data == "hcfg_leave":
         cur = get_setting('leave_all_enabled', False)
         set_setting('leave_all_enabled', not cur)
-        await query.edit_message_text(f"{'✅ Enabled' if not cur else '❌ Disabled'} leave all groups/channels during hardening", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_config")]]))
+        await query.edit_message_text(f"{'✅ **Enabled**' if not cur else '❌ **Disabled**'} 🚪 Leave all groups/channels during hardening", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_config")]]))
     elif data == "hcfg_delchat":
         cur = get_setting('delete_all_chats_enabled', False)
         set_setting('delete_all_chats_enabled', not cur)
-        await query.edit_message_text(f"{'✅ Enabled' if not cur else '❌ Disabled'} delete all chat history during hardening", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_config")]]))
+        await query.edit_message_text(f"{'✅ **Enabled**' if not cur else '❌ **Disabled**'} 🗑️ Delete all chat history during hardening", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_config")]]))
     elif data == "hcfg_join":
         cur = get_setting('auto_join_enabled', False)
         set_setting('auto_join_enabled', not cur)
-        await query.edit_message_text(f"{'✅ Enabled' if not cur else '❌ Disabled'} auto join groups during hardening", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_config")]]))
+        await query.edit_message_text(f"{'✅ **Enabled**' if not cur else '❌ **Disabled**'} 🔗 Auto join groups during hardening", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_config")]]))
     elif data == "hcfg_ad":
         cur = get_setting('auto_delete_harden_enabled', False)
         set_setting('auto_delete_harden_enabled', not cur)
-        await query.edit_message_text(f"{'✅ Enabled' if not cur else '❌ Disabled'} auto-delete timer during hardening", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_config")]]))
+        await query.edit_message_text(f"{'✅ **Enabled**' if not cur else '❌ **Disabled**'} ⏰ Auto-delete timer during hardening", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_config")]]))
 
     elif data == "hcfg_ad_time":
         context.user_data['await'] = 'harden_ad_time'
         seconds = int(get_setting('auto_delete_seconds', 86400))
+        time_str = f"{seconds//86400}d" if seconds >= 86400 else f"{seconds//3600}h" if seconds >= 3600 else f"{seconds}s"
         await query.edit_message_text(
-            "Enter auto-delete timer duration in seconds:\n\n"
-            "Examples:\n"
-            "1 = 1 second\n"
-            "60 = 1 minute\n"
-            "3600 = 1 hour\n"
-            "86400 = 1 day (default)\n"
-            "2592000 = 30 days\n\n"
-            f"Current: {seconds}s",
+            "⏱️ **Enter auto-delete timer duration in seconds:**\n\n"
+            "📌 Examples:\n"
+            "• `1` = 1 second\n"
+            "• `60` = 1 minute\n"
+            "• `3600` = 1 hour\n"
+            "• `86400` = 1 day (default)\n"
+            "• `2592000` = 30 days\n\n"
+            f"📊 Current: `{seconds}s` ({time_str})",
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_config")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_config")]])
         )
 
     elif data == "harden_all":
         if not active_accounts:
-            await query.edit_message_text("❌ No active accounts!", 
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
+            await query.edit_message_text("❌ **No active accounts!**\n\n📱 Please add an account first:\nManage Accounts → Add Phone + OTP", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
             return
         
-        # Build account selection - use phone/name from active_accounts list directly
         kb = []
         for a in active_accounts:
             name = a.get('name', 'Unknown')[:15]
             phone = a.get('phone', 'N/A')
-            btn_text = f" {name} | {phone[-4:]}"
-            kb.append([InlineKeyboardButton(btn_text, callback_data=f"hdn_{a['id']}")])
-        kb.append([InlineKeyboardButton(" Back", callback_data="m_harden")])
-        await query.edit_message_text(
-            "Select account to harden:\n\n"
-            "All configured options will be applied in 1 click!\n"
-            "Check Hardening Options first to customize.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+            kb.append([InlineKeyboardButton(f"🛡️ {name} | 📱{phone[-4:]}", callback_data=f"hdn_{a['id']}")])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_harden")])
+        await query.edit_message_text(f"🛡️ **Select account to harden:**\n\n⚡ All configured options will be applied in **1 click**!\n\n📊 **{len(active_accounts)}** active account(s) available", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data.startswith("hdn_"):
         aid = data.split('_')[1]
-        # Find account from active_accounts list directly
+        # FIX: Search multiple sources
         acc = None
         for a in active_accounts:
             if a['id'] == aid:
@@ -1220,101 +1190,86 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not acc:
             acc = find_account(aid)
         if not acc:
-            await query.edit_message_text("❌ Account not found! Try adding the account first.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
+            all_accs = get_all_accounts()
+            for a in all_accs:
+                if a['id'] == aid:
+                    acc = a
+                    break
+        if not acc:
+            await query.edit_message_text("❌ **Account not found!**\n\n🔍 Make sure the account is properly added.\n📱 Go to: Manage Accounts → Add Phone + OTP\n🔑 Or use: Add Session String", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
             return
-        await query.edit_message_text(f"⏳ Hardening started...\nAccount: {acc.get('name', 'Unknown')}\nPlease wait...", parse_mode='Markdown')
+        
+        await query.edit_message_text(f"⏳ **Hardening started...**\n\n👤 **Account:** {acc.get('name', 'Unknown')}\n📱 **Phone:** {acc.get('phone', 'N/A')}\n⚡ **Please wait, this may take a few minutes...**", parse_mode='Markdown')
         result = await harden_account_one_click(acc)
-        await query.edit_message_text(f"Results:\n\n{result}", parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
+        await query.edit_message_text(f"✅ **Hardening Complete!**\n\n{result}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
 
     elif data == "harden_name":
         context.user_data['await'] = 'harden_name'
         cur = get_setting('new_account_name', '')
-        await query.edit_message_text(f"Enter new name:\nCurrent: {cur or 'Not set'}", parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
+        await query.edit_message_text(f"✏️ **Enter new account name:**\n\n📌 Current: `{cur or 'Not set'}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
 
     elif data == "harden_bio":
         context.user_data['await'] = 'harden_bio'
         cur = get_setting('new_account_bio', '')
-        await query.edit_message_text(f"Enter new bio:\nCurrent: {cur or 'Not set'}", parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
+        await query.edit_message_text(f"✏️ **Enter new account bio:**\n\n📌 Current: `{cur or 'Not set'}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
 
     elif data == "harden_photo":
-        txt = "Profile Photo Management\n\n"
-        if (USER_DATA_DIR / 'new_profile_pic.jpg').exists():
-            txt += "New photo ready to upload (new_profile_pic.jpg)\n"
-        else:
-            txt += "No new photo set. Send a photo to save as new profile pic.\n"
-        txt += "\nOptions:"
+        has_new = "✅" if (USER_DATA_DIR / 'new_profile_pic.jpg').exists() else "❌"
+        txt = f"🖼️ **Profile Photo Management**\n\n📸 New photo saved: {has_new}\n\n**Options:**\n• Toggle 'Delete old DP' in Configure Options\n• Upload a new photo below\n• Photo will be applied during 1-click hardening"
         kb = [
-            [InlineKeyboardButton("Delete Current DP (during hardening)", callback_data="hcfg_dp")],
-            [InlineKeyboardButton("Upload New Profile Pic", callback_data="harden_upload_photo")],
-            [InlineKeyboardButton("Back", callback_data="m_harden")]
+            [InlineKeyboardButton("🗑️ Toggle Delete Old DP", callback_data="hcfg_dp")],
+            [InlineKeyboardButton("📤 Upload New Profile Pic", callback_data="harden_upload_photo")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_harden")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "harden_upload_photo":
         context.user_data['await'] = 'harden_photo_upload'
-        await query.edit_message_text(
-            "Send the photo you want to set as new profile picture.\n\n"
-            "It will be saved and applied during 1-click hardening.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_photo")]])
-        )
+        await query.edit_message_text("📤 **Send the photo** you want to use as new profile picture.\n\n📌 It will be saved and applied during **1-click hardening**.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_photo")]]))
 
     elif data == "harden_devices":
         if not active_accounts:
-            await query.edit_message_text("❌ No active accounts!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
+            await query.edit_message_text("❌ **No active accounts!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
             return
-        kb = [[InlineKeyboardButton(f"{a.get('name','?')[:15]}", callback_data=f"hdv_{a['id']}")] for a in active_accounts[:10]]
-        kb.append([InlineKeyboardButton("Back", callback_data="m_harden")])
-        await query.edit_message_text("Select account to view devices:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        kb = [[InlineKeyboardButton(f"📱 {a.get('name','?')[:15]}", callback_data=f"hdv_{a['id']}")] for a in active_accounts[:10]]
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_harden")])
+        await query.edit_message_text("📱 **Select account to view devices:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data.startswith("hdv_"):
         aid = data.split('_')[1]
         info = await get_device_login_info(aid)
-        await query.edit_message_text(f"Device Info:\n\n{info[:3500]}", parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_devices"), InlineKeyboardButton("Refresh", callback_data=f"hdv_{aid}")]]))
+        await query.edit_message_text(f"📱 **Device Info:**\n\n{info[:3500]}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_devices"), InlineKeyboardButton("🔄 Refresh", callback_data=f"hdv_{aid}")]]))
 
     elif data == "harden_links":
         links = load_autojoin_links()
-        txt = "Auto Join Links\n\nLinks where accounts will auto-join during hardening:\n\n"
+        txt = "🔗 **Auto Join Links**\n\n📌 Accounts will auto-join these during hardening:\n\n"
         if links:
             for i, link in enumerate(links, 1):
-                txt += f"{i}. {link[:40]}...\n"
+                txt += f"{i}. `{link[:40]}`...\n"
         else:
-            txt += "No links set. Add links below.\n"
-        kb = [
-            [InlineKeyboardButton("Add Link", callback_data="harden_link_add")],
-            [InlineKeyboardButton("Back", callback_data="m_harden")]
-        ]
+            txt += "❌ No links configured yet.\n"
+        txt += "\n➕ Add links below:"
+        kb = [[InlineKeyboardButton("➕ Add Link", callback_data="harden_link_add")], [InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]
         await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "harden_link_add":
         context.user_data['await'] = 'harden_link_add'
-        await query.edit_message_text("Send group/channel invite link:\ne.g. https://t.me/yourgroup", parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_links")]]))
+        await query.edit_message_text("🔗 **Send group/channel invite link:**\n\n📌 Example: `https://t.me/yourgroup`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_links")]]))
 
     elif data == "harden_proxy":
-        txt = "Account Proxy Settings\n\n"
-        txt += "Set individual proxy for each account.\n"
-        txt += "Format: type://user:pass@host:port\n"
-        txt += "Example: socks5://user:pass@127.0.0.1:9050\n\n"
+        txt = "🌐 **Account Proxy Settings**\n\nSet individual proxy for each account.\n📌 Format: `type://user:pass@host:port`\n📌 Example: `socks5://user:pass@127.0.0.1:9050`\n\n"
         if not active_accounts:
-            txt += "No active accounts."
+            txt += "❌ No active accounts."
         else:
-            txt += "Select account to configure proxy:"
-        
+            txt += "📊 Select account to configure proxy:"
         kb = []
         for a in active_accounts[:10]:
             name = a.get('name', '?')[:15]
             proxy_info = get_account_proxy(a['id'])
             status = "✅" if proxy_info else "❌"
-            kb.append([InlineKeyboardButton(f"{status} {name}", callback_data=f"proxy_set_{a['id']}")])
-        kb.append([InlineKeyboardButton("Remove All Proxies", callback_data="proxy_remove_all")])
-        kb.append([InlineKeyboardButton("Back", callback_data="m_harden")])
+            kb.append([InlineKeyboardButton(f"{status} 🌐 {name}", callback_data=f"proxy_set_{a['id']}")])
+        kb.append([InlineKeyboardButton("🗑️ Remove All Proxies", callback_data="proxy_remove_all")])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_harden")])
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data.startswith("proxy_set_"):
@@ -1322,92 +1277,79 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['proxy_account_id'] = aid
         context.user_data['await'] = 'set_proxy'
         current = get_account_proxy(aid)
-        txt = f"Enter proxy for account:\n\n"
+        txt = "🌐 **Enter proxy for account:**\n\n"
         if current:
-            txt += f"Current: {current.get('proxy_type','?')}://{current.get('username','') or 'none'}@{current.get('addr','?')}:{current.get('port','?')}\n\n"
-        txt += "Format: type://username:password@host:port\n"
-        txt += "Example: socks5://user:pass@127.0.0.1:9050\n\n"
-        txt += "Send 'remove' to remove proxy."
-        await query.edit_message_text(txt, parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_proxy")]]))
+            txt += f"📌 Current: `{current.get('proxy_type','?')}://{current.get('username','') or 'none'}@{current.get('addr','?')}:{current.get('port','?')}`\n\n"
+        txt += "📌 Format: `type://username:password@host:port`\n📌 Example: `socks5://user:pass@127.0.0.1:9050`\n\n📌 Send `remove` to clear proxy."
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_proxy")]]))
 
     elif data == "proxy_remove_all":
         save_json(ACCOUNT_PROXIES_FILE, {})
-        await query.edit_message_text("✅ All proxies removed!", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_proxy")]]))
+        await query.edit_message_text("🗑️ **All proxies removed!**\n✅ Accounts will use default proxy settings.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_proxy")]]))
 
     elif data == "harden_history":
-        txt = "Hardening History\n\n"
+        txt = "📋 **Hardening History**\n\n"
         has_data = False
         for acc in active_accounts:
             tasks = load_harden_tasks().get(acc['id'], [])
             if tasks:
                 has_data = True
-                txt += f" {acc.get('name','?')}\n"
+                txt += f"👤 **{acc.get('name','?')}**\n"
                 for t in tasks[-5:]:
                     status = "✅" if t['status'] == 'completed' else "⏳"
-                    txt += f"  {status} {t['type']} - {t['created_at'][:16]}\n"
+                    txt += f"  {status} `{t['type']}` - {t['created_at'][:16]}\n"
                 txt += "\n"
         if not has_data:
-            txt += "No history yet. Use 1 Click Hardening."
-        await query.edit_message_text(txt[:4000], parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
+            txt += "❌ No history yet. Use **1 Click Hardening** first."
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
 
     # ====== ACCOUNT MANAGEMENT ======
     elif data == "m_acc":
         ma = len(get_main_accounts())
         ba = len(get_backup_accounts())
         act = len(active_accounts)
-        txt = f"Account Management\nMain: {ma} | Backup: {ba} | Active: {act}"
+        txt = f"📱 **Account Management**\n\nMain: {ma} | Backup: {ba} | Active: {act}"
         kb = [
-            [InlineKeyboardButton("Add Phone + OTP", callback_data="ac_ph")],
-            [InlineKeyboardButton("Add Session String", callback_data="ac_ss")],
-            [InlineKeyboardButton("Delete Account", callback_data="ac_del")],
-            [InlineKeyboardButton("Backup Management", callback_data="ac_bk")],
-            [InlineKeyboardButton("List All", callback_data="ac_ls")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
+            [InlineKeyboardButton("📱 Add Phone + OTP", callback_data="ac_ph")],
+            [InlineKeyboardButton("🔑 Add Session String", callback_data="ac_ss")],
+            [InlineKeyboardButton("🗑️ Delete Account", callback_data="ac_del")],
+            [InlineKeyboardButton("💾 Backup Management", callback_data="ac_bk")],
+            [InlineKeyboardButton("📋 List All", callback_data="ac_ls")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "ac_ph":
         context.user_data['await'] = 'ac_ph'
-        await query.edit_message_text("Enter phone number:\n\nFormat: +8801XXXXXXXXX", parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
+        await query.edit_message_text("📱 **Enter phone number:**\n\nFormat: `+8801XXXXXXXXX`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
 
     elif data == "ac_ss":
         context.user_data['await'] = 'ac_ss'
-        await query.edit_message_text("Paste Session String:", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
+        await query.edit_message_text("🔑 **Paste Session String:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
 
     elif data == "ac_del":
         all_a = get_all_accounts()
         if not all_a:
-            await query.edit_message_text("❌ No accounts!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
+            await query.edit_message_text("❌ **No accounts!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
             return
-        # Admins can only delete non-owner accounts
         kb = []
         for a in all_a:
             is_owner = a.get('user_id') == OWNER_ID
             if user_id == OWNER_ID or not is_owner:
                 btn_text = f"🗑️ {a.get('name','?')} | {a.get('phone','N/A')}"
                 if is_owner:
-                    btn_text += " [OWNER]"
+                    btn_text += " 👑"
                 kb.append([InlineKeyboardButton(btn_text, callback_data=f"acd_{a['id']}")])
-        kb.append([InlineKeyboardButton("Back", callback_data="m_acc")])
-        await query.edit_message_text("Select account to delete:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_acc")])
+        await query.edit_message_text("🗑️ **Select account to delete:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data.startswith("acd_"):
         aid = data.split('_', 1)[1]
         a = find_account(aid)
         name = a.get('name', '?') if a else '?'
-        
-        # Check if admin trying to delete owner
         if a and a.get('user_id') == OWNER_ID and user_id != OWNER_ID:
-            await query.edit_message_text("❌ Admins cannot delete the owner account!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
+            await query.edit_message_text("❌ **Admins cannot delete the owner account!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
             return
-        
         if aid in account_keepalive_tasks:
             if not account_keepalive_tasks[aid].done():
                 account_keepalive_tasks[aid].cancel()
@@ -1420,1171 +1362,1152 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try: await account_spam_tasks[aid]
                 except: pass
             del account_spam_tasks[aid]
-        if aid in account_clients:
-            try: await account_clients[aid].disconnect()
-            except: pass
-            del account_clients[aid]
-        active_accounts[:] = [x for x in active_accounts if x['id'] != aid]
-        for d in [account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active]:
-            if aid in d: del d[aid]
+        if aid in account_spam_active:
+            del account_spam_active[aid]
+        
+        # Remove from active_accounts
+        global active_accounts
+        active_accounts = [a for a in active_accounts if a['id'] != aid]
+        
+        # Disconnect client
+        client = account_clients.pop(aid, None)
+        if client:
+            try:
+                await client.disconnect()
+            except:
+                pass
+        
         remove_account_data(aid)
-        remove_account_proxy(aid)
-        await query.edit_message_text(f"✅ {name} permanently deleted!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
-
-    elif data == "ac_bk":
+        await query.edit_message_text(
+            f"🗑️ **Account Deleted!**\n\n👤 {name}\n✅ Removed from all storage.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]])
+        )
+        elif data == "ac_bk":
         ba = get_backup_accounts()
-        txt = f"Backup Accounts\nTotal: {len(ba)}\n\n"
-        for i, a in enumerate(ba, 1):
-            txt += f"{i}. {a.get('name', '?')} ({a.get('phone', 'N/A')})\n"
+        txt = f"💾 **Backup Management**\n\nBackup accounts: {len(ba)}\n\n"
+        if ba:
+            for a in ba:
+                txt += f"  • {a.get('name','?')} | {a.get('phone','N/A')}\n"
+        else:
+            txt += "📌 No backup accounts.\n"
+        txt += "\n➕ Add backup accounts from active accounts."
         kb = [
-            [InlineKeyboardButton("Add Backup Session", callback_data="ac_bk_add")],
-            [InlineKeyboardButton("Remove Backup", callback_data="ac_bk_del")],
-            [InlineKeyboardButton("Backup → Active (1 Click)", callback_data="ac_bk_to_run")],
-            [InlineKeyboardButton("Back", callback_data="m_acc")]
+            [InlineKeyboardButton("📋 Add as Backup", callback_data="ac_bk_add")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_acc")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "ac_bk_add":
-        context.user_data['await'] = 'ac_bk_ss'
-        await query.edit_message_text("Paste backup Session String:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ac_bk")]]))
-
-    elif data == "ac_bk_del":
-        ba = get_backup_accounts()
-        if not ba:
-            await query.edit_message_text("❌ No backup accounts!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ac_bk")]]))
+        ma = get_main_accounts()
+        if not ma:
+            await query.edit_message_text("❌ **No main accounts to backup!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
             return
-        kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"acbkd_{a['id']}")] for a in ba]
-        kb.append([InlineKeyboardButton("Back", callback_data="ac_bk")])
-        await query.edit_message_text("Select backup to remove:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        kb = []
+        for a in ma:
+            kb.append([InlineKeyboardButton(f"💾 {a.get('name','?')} | {a.get('phone','N/A')}", callback_data=f"bk_{a['id']}")])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="ac_bk")])
+        await query.edit_message_text("💾 **Select account to backup:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == "ac_bk_to_run":
-        ba = get_backup_accounts()
-        if not ba:
-            await query.edit_message_text("❌ No backup accounts!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ac_bk")]]))
-            return
-        kb = [[InlineKeyboardButton(f"➡️ {a.get('name','?')} ({a.get('phone','N/A')})", callback_data=f"b2r_{a['id']}")] for a in ba]
-        kb.append([InlineKeyboardButton("Back", callback_data="ac_bk")])
-        await query.edit_message_text("Which backup to activate?\n\nAuto reply + spam will start!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data.startswith("b2r_"):
-        bid = data.split('_')[1]
-        backup_acc = None
-        for a in get_backup_accounts():
-            if a['id'] == bid:
-                backup_acc = a
-                break
-        if not backup_acc:
-            await query.edit_message_text("❌ Account not found!")
-            return
-        backup_acc['is_backup'] = False
-        add_account_data(backup_acc)
-        remove_account_data(bid)
-        try:
-            nc = await start_account(backup_acc)
-            if nc:
-                active_accounts.append(backup_acc)
-                account_clients[backup_acc['id']] = nc
-                account_stats[backup_acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                account_stop_flags[backup_acc['id']] = False
-                if auto_reply_enabled:
-                    await setup_auto_reply_for_account(backup_acc['id'], nc)
-                await query.edit_message_text(f"✅ {backup_acc.get('name','?')} is now active!",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ac_bk")]]))
-        except Exception as e:
-            await query.edit_message_text(f"❌ Failed: {str(e)[:100]}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ac_bk")]]))
-
-    elif data.startswith("acbkd_"):
-        bid = data.split('_')[1]
-        remove_account_data(bid)
-        await query.edit_message_text("✅ Backup removed!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ac_bk")]]))
+    elif data.startswith("bk_"):
+        aid = data.split('_')[1]
+        a = find_account(aid)
+        if a:
+            a['is_backup'] = True
+            add_account_data(a)
+            # Remove from active if present
+            global active_accounts
+            active_accounts = [x for x in active_accounts if x['id'] != aid]
+            if aid in account_clients:
+                try: await account_clients[aid].disconnect()
+                except: pass
+                del account_clients[aid]
+            await query.edit_message_text(f"✅ **Account {a.get('name','?')} set as backup!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
+        else:
+            await query.edit_message_text("❌ Account not found!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
 
     elif data == "ac_ls":
         all_a = get_all_accounts()
-        if not all_a:
-            await query.edit_message_text("❌ No accounts!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
-            return
-        txt = f"All Accounts ({len(all_a)})\n\n"
+        txt = f"📋 **All Accounts** ({len(all_a)})\n\n"
         for i, a in enumerate(all_a, 1):
-            n = a.get('name', '?')
-            p = a.get('phone', 'N/A')
-            tp = "MAIN" if not a.get('is_backup') else "BKP"
-            st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
-            txt += f"{st} {tp} {i}. {n} 📱{p}\n"
-        await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
-        # ====== CHANNEL BACKUP ======
-    elif data == "m_channel":
-        ch_data = load_channel_backup()
-        main_chs = ch_data.get('main_channels', [])
-        bk_chs = ch_data.get('backup_channels', [])
-        active_ch = ch_data.get('active_channel', None)
-        
-        txt = f"Channel Backup System\n\n"
-        txt += f"═══════════════════════\n"
-        txt += f"Main Channels: {len(main_chs)}\n"
-        txt += f"Backup Channels: {len(bk_chs)}\n"
-        txt += f"Active: {active_ch.get('title','❌ None') if active_ch else '❌ None'}\n"
-        txt += f"═══════════════════════\n\n"
-        txt += "When kicked/restricted from main channel,\n"
-        txt += "automatically join backup channel\n"
-        txt += "and continue spamming there!\n"
-        txt += "Your customers will never be lost!"
-        
-        kb = [
-            [InlineKeyboardButton("Add Main Channel", callback_data="ch_add_main")],
-            [InlineKeyboardButton("Add Backup Channel", callback_data="ch_add_backup")],
-            [InlineKeyboardButton("View List", callback_data="ch_list")],
-            [InlineKeyboardButton("Remove Channel", callback_data="ch_remove")],
-            [InlineKeyboardButton(f"Toggle {'ON' if get_setting('channel_backup_enabled', True) else 'OFF'}", callback_data="ch_toggle")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "ch_add_main":
-        context.user_data['await'] = 'ch_add_main'
-        await query.edit_message_text("Enter main channel ID or username:\n\ne.g. @yourchannel or -1001234567890\n\nNote: Account must be a member of the channel!",
-            parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_channel")]]))
-
-    elif data == "ch_add_backup":
-        context.user_data['await'] = 'ch_add_backup'
-        await query.edit_message_text("Enter backup channel ID or username:\n\ne.g. @backupchannel or -1001234567890\n\nWhen kicked from main channel, auto-join this!",
-            parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_channel")]]))
-
-    elif data == "ch_list":
-        ch_data = load_channel_backup()
-        txt = "Channel List:\n\n"
-        txt += "═══ Main Channels: ═══\n"
-        if ch_data['main_channels']:
-            for i, ch in enumerate(ch_data['main_channels'], 1):
-                txt += f"{i}. {ch.get('title','?')} ({ch.get('id','?')})\n"
-        else:
-            txt += "❌ No main channels\n"
-        txt += "\n═══ Backup Channels: ═══\n"
-        if ch_data['backup_channels']:
-            for i, ch in enumerate(ch_data['backup_channels'], 1):
-                txt += f"{i}. {ch.get('title','?')} ({ch.get('id','?')})\n"
-        else:
-            txt += "❌ No backup channels\n"
-        txt += f"\nActive Channel: {ch_data['active_channel'].get('title','❌ None') if ch_data['active_channel'] else '❌ None'}"
-        await query.edit_message_text(txt[:4000], parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_channel")]]))
-
-    elif data == "ch_remove":
-        ch_data = load_channel_backup()
-        all_chs = ch_data['main_channels'] + ch_data['backup_channels']
-        if not all_chs:
-            await query.edit_message_text("❌ No channels!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_channel")]]))
-            return
-        kb = []
-        for ch in all_chs:
-            label = f"🗑️ {ch.get('title','?')[:20]}"
-            kb.append([InlineKeyboardButton(label, callback_data=f"chrm_{ch['id']}_{ch.get('type','main')}")])
-        kb.append([InlineKeyboardButton("Back", callback_data="m_channel")])
-        await query.edit_message_text("Select channel to remove:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data.startswith("chrm_"):
-        parts = data.split('_')
-        ch_id = parts[1]
-        ch_type = parts[2]
-        data_ch = load_channel_backup()
-        if ch_type == 'main':
-            data_ch['main_channels'] = [ch for ch in data_ch['main_channels'] if str(ch['id']) != ch_id]
-        else:
-            data_ch['backup_channels'] = [ch for ch in data_ch['backup_channels'] if str(ch['id']) != ch_id]
-        if data_ch['active_channel'] and str(data_ch['active_channel']['id']) == ch_id:
-            data_ch['active_channel'] = None
-        save_channel_backup(data_ch)
-        await query.edit_message_text("✅ Channel removed!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_channel")]]))
-
-    elif data == "ch_toggle":
-        cur = get_setting('channel_backup_enabled', True)
-        set_setting('channel_backup_enabled', not cur)
-        status = "ON" if not cur else "OFF"
-        await query.edit_message_text(f"✅ Channel backup is now {status}!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_channel")]]))
+            is_active = a['id'] in account_clients
+            is_owner = a.get('user_id') == OWNER_ID
+            status = "🟢" if is_active else "🔴"
+            owner_badge = " 👑" if is_owner else ""
+            bak_badge = " 💾" if a.get('is_backup') else ""
+            txt += f"{status} {i}. {a.get('name','?')} | {a.get('phone','N/A')}{owner_badge}{bak_badge}\n"
+        txt += f"\n📊 Active: {len(active_accounts)} | Available: {len(all_a)}"
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="ac_ls"), InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
 
     # ====== AUTO REPLY ======
     elif data == "m_ar":
-        running = sum(1 for a in active_accounts if a.get('enabled', True))
-        total = len(active_accounts)
-        status = "🟢 ACTIVE" if auto_reply_enabled else "🔴 STOPPED"
-        text = f"Auto Reply\n\nStatus: {status}\nActive: {running}/{total}"
+        status = "🟢 **Active**" if auto_reply_enabled else "🔴 **Inactive**"
+        welcome = get_setting('welcome_message', 'Not set')[:50] or 'Not set'
+        welcome2 = get_setting('welcome_message_2', 'Not set')[:50] or 'Not set'
+        wait = get_setting('wait_time', 300)
+        typing = get_setting('typing_duration', 240)
+        typing_en = "✅" if get_setting('typing_enabled', True) else "❌"
+        block_photo = "✅" if get_setting('block_photo_enabled', True) else "❌"
+        
+        txt = (
+            f"🤖 **Auto Reply System**\n\n"
+            f"Status: {status}\n"
+            f"═══════════════════════\n"
+            f"📝 Welcome Msg: `{welcome}`\n"
+            f"📝 Msg 2: `{welcome2}`\n"
+            f"⏱️ Wait: `{wait}s`\n"
+            f"⌨️ Typing: `{typing}s` ({typing_en})\n"
+            f"🖼️ Block Photo: {block_photo}\n"
+            f"👥 Active Accounts: {len(active_accounts)}\n"
+            f"═══════════════════════\n"
+            f"📌 Supported: keywords, welcome msgs, typing simulation"
+        )
         kb = [
-            [InlineKeyboardButton("Start All", callback_data="ar_start")],
-            [InlineKeyboardButton("Stop All", callback_data="ar_stop")],
-            [InlineKeyboardButton("Welcome Message", callback_data="ar_welcome")],
-            [InlineKeyboardButton("Block Photo", callback_data="ar_blockphoto")],
-            [InlineKeyboardButton("Typing Time", callback_data="ar_typing")],
-            [InlineKeyboardButton("Wait Time", callback_data="ar_waittime")],
-            [InlineKeyboardButton("Ignore Messages", callback_data="ar_ignore")],
-            [InlineKeyboardButton("Custom Replies", callback_data="ar_replies")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
+            [InlineKeyboardButton(f"{'🟢' if auto_reply_enabled else '🔴'} {'Stop' if auto_reply_enabled else 'Start'} Auto Reply", callback_data="ar_toggle")],
+            [InlineKeyboardButton("✏️ Set Welcome Message", callback_data="ar_welcome")],
+            [InlineKeyboardButton("✏️ Set Message 2", callback_data="ar_welcome2")],
+            [InlineKeyboardButton("⏱️ Set Wait Time", callback_data="ar_wait")],
+            [InlineKeyboardButton("⌨️ Typing Settings", callback_data="ar_typing")],
+            [InlineKeyboardButton("🖼️ Toggle Block Photo", callback_data="ar_block_photo")],
+            [InlineKeyboardButton("📋 Manage Keywords", callback_data="ar_keywords")],
+            [InlineKeyboardButton("📤 Upload Welcome Image", callback_data="ar_upload_img")],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="main")]
         ]
-        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == "ar_start":
-        auto_reply_enabled = True
-        await setup_auto_reply_all()
-        await query.edit_message_text("✅ Auto reply started!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_ar")]]))
-
-    elif data == "ar_stop":
-        auto_reply_enabled = False
-        await remove_auto_reply_all()
-        await query.edit_message_text("⏹️ Auto reply stopped!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_ar")]]))
+    elif data == "ar_toggle":
+        global auto_reply_enabled
+        if auto_reply_enabled:
+            auto_reply_enabled = False
+            await remove_auto_reply_all()
+            await query.edit_message_text("🔴 **Auto Reply Stopped**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+        else:
+            if not account_clients:
+                await query.edit_message_text("❌ **No active accounts!** Add accounts first.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+                return
+            auto_reply_enabled = True
+            await setup_auto_reply_all()
+            await query.edit_message_text("🟢 **Auto Reply Started** on all active accounts!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
 
     elif data == "ar_welcome":
-        enabled = get_setting('welcome_enabled', True)
-        status = "ON" if enabled else "OFF"
-        has_img = "✅ Set" if WELCOME_IMAGE_FILE.exists() else "❌ Not set"
-        txt = f"Welcome Message\nStatus: {status}\nImage: {has_img}"
-        kb = [
-            [InlineKeyboardButton(f"Toggle {'ON' if enabled else 'OFF'}", callback_data="ar_welcome_tog")],
-            [InlineKeyboardButton("Edit Text 1", callback_data="ar_welcome_edit")],
-            [InlineKeyboardButton("Edit Text 2", callback_data="ar_welcome_edit2")],
-            [InlineKeyboardButton("Set Image", callback_data="ar_welcome_img")],
-            [InlineKeyboardButton("Back", callback_data="m_ar")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        context.user_data['await'] = 'ar_welcome'
+        cur = get_setting('welcome_message', 'Not set')
+        await query.edit_message_text(f"✏️ **Enter welcome message:**\n\n📌 Current: `{cur}`\n📌 Send `clear` to remove.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
 
-    elif data == "ar_welcome_tog":
-        cur = get_setting('welcome_enabled', True)
-        set_setting('welcome_enabled', not cur)
-        enabled = not cur
-        status = "ON" if enabled else "OFF"
-        has_img = "✅ Set" if WELCOME_IMAGE_FILE.exists() else "❌ Not set"
-        txt = f"Welcome Message\nStatus: {status}\nImage: {has_img}"
-        kb = [
-            [InlineKeyboardButton(f"Toggle {'ON' if enabled else 'OFF'}", callback_data="ar_welcome_tog")],
-            [InlineKeyboardButton("Edit Text 1", callback_data="ar_welcome_edit")],
-            [InlineKeyboardButton("Edit Text 2", callback_data="ar_welcome_edit2")],
-            [InlineKeyboardButton("Set Image", callback_data="ar_welcome_img")],
-            [InlineKeyboardButton("Back", callback_data="m_ar")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+    elif data == "ar_welcome2":
+        context.user_data['await'] = 'ar_welcome2'
+        cur = get_setting('welcome_message_2', 'Not set')
+        await query.edit_message_text(f"✏️ **Enter second welcome message:**\n\n📌 Current: `{cur}`\n📌 Send `clear` to remove.\n📌 Sent 30 seconds after first.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
 
-    elif data == "ar_welcome_edit":
-        context.user_data['await'] = 'welcome_text'
-        await query.edit_message_text("Enter new welcome text 1:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_welcome")]]))
-
-    elif data == "ar_welcome_edit2":
-        context.user_data['await'] = 'welcome_text_2'
-        await query.edit_message_text("Enter new welcome text 2 (sent 30s after text 1):",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_welcome")]]))
-
-    elif data == "ar_welcome_img":
-        context.user_data['await'] = 'welcome_image'
-        await query.edit_message_text("Send the image:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_welcome")]]))
-
-    elif data == "ar_blockphoto":
-        enabled = get_setting('block_photo_enabled', True)
-        txt = f"Block Photo: {'ON' if enabled else 'OFF'}"
-        kb = [
-            [InlineKeyboardButton(f"Toggle {'ON' if enabled else 'OFF'}", callback_data="ar_blockphoto_tog")],
-            [InlineKeyboardButton("Back", callback_data="m_ar")]
-        ]
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "ar_blockphoto_tog":
-        cur = get_setting('block_photo_enabled', True)
-        set_setting('block_photo_enabled', not cur)
-        enabled = not cur
-        txt = f"Block Photo: {'ON' if enabled else 'OFF'}"
-        kb = [
-            [InlineKeyboardButton(f"Toggle {'ON' if enabled else 'OFF'}", callback_data="ar_blockphoto_tog")],
-            [InlineKeyboardButton("Back", callback_data="m_ar")]
-        ]
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+    elif data == "ar_wait":
+        context.user_data['await'] = 'ar_wait'
+        cur = get_setting('wait_time', 300)
+        await query.edit_message_text(f"⏱️ **Enter wait time before reply (in seconds):**\n\n📌 Current: `{cur}s`\n📌 Range: 1-30 (capped automatically)", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
 
     elif data == "ar_typing":
-        enabled = get_setting('typing_enabled', True)
-        duration = int(get_setting('typing_duration', 240))
-        txt = f"Typing: {'ON' if enabled else 'OFF'} | {duration}s"
-        kb = [
-            [InlineKeyboardButton(f"Toggle {'ON' if enabled else 'OFF'}", callback_data="ar_typing_tog")],
-            [InlineKeyboardButton("Set Time", callback_data="ar_typing_time")],
-            [InlineKeyboardButton("Back", callback_data="m_ar")]
-        ]
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+        context.user_data['await'] = 'ar_typing'
+        cur = get_setting('typing_duration', 240)
+        typing_en = get_setting('typing_enabled', True)
+        en_status = "✅ Enabled" if typing_en else "❌ Disabled"
+        await query.edit_message_text(f"⌨️ **Typing Simulation Settings**\n\nStatus: {en_status}\nDuration: `{cur}s`\n\n📌 Enter duration in seconds (1-8):\n📌 Or click toggle:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"{'❌' if typing_en else '✅'} Toggle Typing", callback_data="ar_typing_toggle")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_ar")]
+        ]))
 
-    elif data == "ar_typing_tog":
-        cur = get_setting('typing_enabled', True)
-        set_setting('typing_enabled', not cur)
-        enabled = not cur
-        duration = int(get_setting('typing_duration', 240))
-        txt = f"Typing: {'ON' if enabled else 'OFF'} | {duration}s"
-        kb = [
-            [InlineKeyboardButton(f"Toggle {'ON' if enabled else 'OFF'}", callback_data="ar_typing_tog")],
-            [InlineKeyboardButton("Set Time", callback_data="ar_typing_time")],
-            [InlineKeyboardButton("Back", callback_data="m_ar")]
-        ]
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+    elif data == "ar_typing_toggle":
+        cur = not get_setting('typing_enabled', True)
+        set_setting('typing_enabled', cur)
+        await query.edit_message_text(f"{'✅ **Enabled**' if cur else '❌ **Disabled**'} typing simulation.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
 
-    elif data == "ar_typing_time":
-        context.user_data['await'] = 'typing_time'
-        await query.edit_message_text(f"Enter time in seconds (0-300):\nCurrent: {get_setting('typing_duration', 240)}s",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_typing")]]))
+    elif data == "ar_block_photo":
+        cur = not get_setting('block_photo_enabled', True)
+        set_setting('block_photo_enabled', cur)
+        await query.edit_message_text(f"{'✅ **Will block**' if cur else '❌ **Will NOT block**'} photo messages from auto-reply.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
 
-    elif data == "ar_waittime":
-        current = int(get_setting('wait_time', 300))
-        txt = f"Wait Time: {current}s ({current//60}m)"
-        kb = [
-            [InlineKeyboardButton("0s", callback_data="wt_0"), InlineKeyboardButton("60s", callback_data="wt_60")],
-            [InlineKeyboardButton("120s", callback_data="wt_120"), InlineKeyboardButton("300s", callback_data="wt_300")],
-            [InlineKeyboardButton("Custom", callback_data="wt_custom")],
-            [InlineKeyboardButton("Back", callback_data="m_ar")]
-        ]
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data.startswith("wt_"):
-        val = data.split("_")[1]
-        if val == "custom":
-            context.user_data['await'] = 'wait_time'
-            await query.edit_message_text(f"Enter seconds (0-600):\nCurrent: {get_setting('wait_time', 300)}s",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_waittime")]]))
-        else:
-            set_setting('wait_time', int(val))
-            await query.edit_message_text(f"✅ Set to {val}s!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_waittime")]]))
-
-    elif data == "ar_ignore":
-        context.user_data['await'] = 'ignore'
-        cur = get_setting('ignored_messages', '')
-        txt = "Ignore Messages:\nOne per line\n\n"
-        if cur: txt += f"Current:\n{cur}"
-        await query.edit_message_text(txt,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_ar")]]))
-
-    elif data == "ar_replies":
-        replies = load_json(REPLIES_FILE, [])
-        txt = "Custom Replies:\n"
+    elif data == "ar_keywords":
+        replies = load_replies()
+        txt = "📋 **Keyword Reply Manager**\n\n"
         if replies:
-            for r in replies[-10:]:
-                txt += f"{r['keyword'][:12]} → {r['reply'][:20]}...\n"
-        else: txt += "None yet. Use /add_reply keyword reply\n"
-        await query.edit_message_text(txt,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_ar")]]))
+            for i, r in enumerate(replies, 1):
+                kw = r.get('keyword', '?')[:20]
+                rp = r.get('reply', '?')[:30]
+                txt += f"{i}. `{kw}` → `{rp}`\n"
+            txt += f"\n📊 Total: {len(replies)} keywords"
+        else:
+            txt += "❌ No keywords configured.\n\n📌 When someone sends a message containing a keyword, the bot auto-replies with the configured response."
+        kb = [
+            [InlineKeyboardButton("➕ Add Keyword", callback_data="ar_kw_add")],
+            [InlineKeyboardButton("🗑️ Remove Keyword", callback_data="ar_kw_del")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_ar")]
+        ]
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "ar_kw_add":
+        context.user_data['await'] = 'ar_kw_add'
+        await query.edit_message_text("📝 **Send keyword and reply separated by `|`**\n\n📌 Format: `keyword | reply text`\n📌 Example: `hello | Hello! How can I help you?`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_keywords")]]))
+
+    elif data == "ar_kw_del":
+        context.user_data['await'] = 'ar_kw_del'
+        await query.edit_message_text("🗑️ **Send keyword number to delete:**\n\n📌 Check numbers from keyword list above.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_keywords")]]))
+
+    elif data == "ar_upload_img":
+        context.user_data['await'] = 'ar_upload_img'
+        await query.edit_message_text("📤 **Send the image** to use as welcome image with auto-reply.\n\n📌 It will be sent before the welcome message.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
 
     # ====== GROUP SPAM ======
     elif data == "m_gs":
-        run = sum(1 for a in active_accounts if account_stats.get(a['id'], {}).get('spam_running', False))
-        st = "🟢 ACTIVE" if group_spam_enabled else "🔴 STOPPED"
-        sent = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
-        txt = f"Group Spam\n{st} | Running: {run}/{len(active_accounts)} | Sent: {sent}"
+        status = "🟢 **Running**" if group_spam_enabled else "🔴 **Stopped**"
+        total_sent = sum(account_stats.get(aid, {}).get('spam_sent', 0) for aid in account_stats)
+        speed = get_setting('spam_speed', 'medium')
+        txt = (
+            f"📨 **Group Spam System**\n\n"
+            f"Status: {status}\n"
+            f"Sent Total: {total_sent}\n"
+            f"Speed: `{speed}`\n"
+            f"Active Accounts: {len(account_clients)}\n"
+            f"═══════════════════════\n"
+            f"📌 Spams to main channels, falls back to backup channels"
+        )
         kb = [
-            [InlineKeyboardButton("START ALL", callback_data="gs_start"), InlineKeyboardButton("STOP ALL", callback_data="gs_stop")],
-            [InlineKeyboardButton("Speed", callback_data="gs_spd")],
-            [InlineKeyboardButton("Messages", callback_data="gs_msg")],
-            [InlineKeyboardButton("Stats", callback_data="gs_st")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
+            [InlineKeyboardButton(f"{'🔴 Stop' if group_spam_enabled else '🟢 Start'} Spam", callback_data="gs_toggle")],
+            [InlineKeyboardButton("⚡ Speed: " + speed, callback_data="gs_speed")],
+            [InlineKeyboardButton("📝 Manage Messages", callback_data="gs_messages")],
+            [InlineKeyboardButton("📋 Stats per Account", callback_data="gs_stats")],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="main")]
         ]
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == "gs_start":
-        group_spam_enabled = True
-        await start_spam_all()
-        await query.edit_message_text("✅ Spam started!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_gs")]]))
-
-    elif data == "gs_stop":
-        group_spam_enabled = False
-        await stop_spam_all()
-        await query.edit_message_text("⏹️ Spam stopped!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_gs")]]))
-
-    elif data == "gs_spd":
-        cur = get_setting('spam_speed', 'medium')
-        kb = [
-            [InlineKeyboardButton(f"{'✅' if cur=='super_fast' else ''} Super Fast", callback_data="gs_sf")],
-            [InlineKeyboardButton(f"{'✅' if cur=='fast' else ''} Fast", callback_data="gs_fa")],
-            [InlineKeyboardButton(f"{'✅' if cur=='medium' else ''} Medium", callback_data="gs_me")],
-            [InlineKeyboardButton(f"{'✅' if cur=='slow' else ''} Slow", callback_data="gs_sl")],
-            [InlineKeyboardButton("Back", callback_data="m_gs")]
-        ]
-        await query.edit_message_text(f"Speed: {cur}", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data in ["gs_sf", "gs_fa", "gs_me", "gs_sl"]:
-        m = {'gs_sf': 'super_fast', 'gs_fa': 'fast', 'gs_me': 'medium', 'gs_sl': 'slow'}
-        set_setting('spam_speed', m[data])
-        await query.edit_message_text(f"✅ Speed: {m[data]}!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_gs")]]))
-
-    elif data == "gs_msg":
-        msgs = load_spam_messages()
-        txt = "Messages:\n"
-        if msgs:
-            for m in msgs[:5]:
-                txt += f"• {m['text'][:30]}...\n"
+    elif data == "gs_toggle":
+        if group_spam_enabled:
+            await stop_spam_all()
+            await query.edit_message_text("🔴 **Group Spam Stopped**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
         else:
-            txt += "Using default message.\n"
+            if not account_clients:
+                await query.edit_message_text("❌ **No active accounts!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
+                return
+            messages = load_spam_messages()
+            if not messages:
+                await query.edit_message_text("❌ **No spam messages!** Add messages first.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
+                return
+            await start_spam_all()
+            await query.edit_message_text("🟢 **Group Spam Started!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
+
+    elif data == "gs_speed":
+        current = get_setting('spam_speed', 'medium')
+        speeds = {'super_fast': '⚡ Most Aggressive', 'fast': '🚀 Fast', 'medium': '⚖️ Balanced', 'slow': '🐢 Safe'}
+        txt = f"⚡ **Spam Speed: {current}**\n\nSelect speed:\n"
+        kb = []
+        for key, label in speeds.items():
+            mark = "✅ " if key == current else ""
+            kb.append([InlineKeyboardButton(f"{mark}{label}", callback_data=f"gss_{key}")])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_gs")])
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data.startswith("gss_"):
+        speed = data.split('_')[1]
+        set_setting('spam_speed', speed)
+        await query.edit_message_text(f"✅ **Speed set to: `{speed}`**\n\nRestart spam for changes to take effect.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
+
+    elif data == "gs_messages":
+        msgs = load_spam_messages()
+        txt = f"📝 **Spam Messages** ({len(msgs)})\n\n"
+        if msgs:
+            for i, m in enumerate(msgs, 1):
+                txt += f"{i}. `{m.get('text','')[:50]}`\n"
+        else:
+            txt += "❌ No messages. Add at least one.\n"
         kb = [
-            [InlineKeyboardButton("Add Message", callback_data="gs_msg_add")],
-            [InlineKeyboardButton("Back", callback_data="m_gs")]
+            [InlineKeyboardButton("➕ Add Message", callback_data="gs_msg_add")],
+            [InlineKeyboardButton("🗑️ Clear All", callback_data="gs_msg_clear")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_gs")]
         ]
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "gs_msg_add":
         context.user_data['await'] = 'gs_msg_add'
-        await query.edit_message_text("Send spam message text:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="gs_msg")]]))
+        await query.edit_message_text("📝 **Send the spam message text:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_messages")]]))
 
-    elif data == "gs_st":
-        txt = "Stats:\n"
-        for a in active_accounts:
-            s = account_stats.get(a['id'], {}).get('spam_sent', 0)
-            r = "▶️" if account_stats.get(a['id'], {}).get('spam_running', False) else "⏹️"
-            txt += f"{r} {a.get('name','?')[:10]}: {s}\n"
-        await query.edit_message_text(txt,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_gs")]]))
+    elif data == "gs_msg_clear":
+        save_spam_messages([])
+        await query.edit_message_text("🗑️ **All spam messages cleared!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_messages")]]))
+
+    elif data == "gs_stats":
+        txt = "📊 **Spam Stats per Account**\n\n"
+        for aid, client in account_clients.items():
+            acc = find_account(aid)
+            stats = account_stats.get(aid, {})
+            name = acc.get('name', '?')[:15] if acc else '?'
+            sent = stats.get('spam_sent', 0)
+            running = "🟢" if stats.get('spam_running', False) else "🔴"
+            txt += f"{running} {name}: {sent} sent\n"
+        if not account_clients:
+            txt += "❌ No active accounts."
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="gs_stats"), InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
+
+    # ====== CHANNEL BACKUP ======
+    elif data == "m_channel":
+        cb = load_channel_backup()
+        mc = len(cb.get('main_channels', []))
+        bc = len(cb.get('backup_channels', []))
+        active = cb.get('active_channel', {})
+        active_name = active.get('name', 'None') if active else 'None'
+        txt = (
+            f"📡 **Channel Backup System**\n\n"
+            f"Main Channels: {mc}\n"
+            f"Backup Channels: {bc}\n"
+            f"Active Channel: {active_name}\n"
+            f"═══════════════════════\n"
+            f"📌 Spam falls back to backup if main fails"
+        )
+        kb = [
+            [InlineKeyboardButton("📋 Manage Main Channels", callback_data="ch_main")],
+            [InlineKeyboardButton("💾 Manage Backup Channels", callback_data="ch_backup")],
+            [InlineKeyboardButton("🔄 Set Active Channel", callback_data="ch_active")],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="main")]
+        ]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "ch_main":
+        cb = load_channel_backup()
+        txt = "📋 **Main Channels**\n\n"
+        channels = cb.get('main_channels', [])
+        if channels:
+            for i, ch in enumerate(channels, 1):
+                txt += f"{i}. {ch.get('name','?')} (`{ch.get('id','?')}`)\n"
+        else:
+            txt += "❌ None configured.\n"
+        kb = [
+            [InlineKeyboardButton("➕ Add", callback_data="ch_main_add")],
+            [InlineKeyboardButton("🗑️ Remove", callback_data="ch_main_rm")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_channel")]
+        ]
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "ch_main_add":
+        context.user_data['await'] = 'ch_main_add'
+        await query.edit_message_text("📡 **Send channel ID or username:**\n\n📌 Example: `-1001234567890` or `@channel`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ch_main")]]))
+
+    elif data == "ch_main_rm":
+        context.user_data['await'] = 'ch_main_rm'
+        await query.edit_message_text("🗑️ **Send channel number to remove (from list above):**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ch_main")]]))
+
+    elif data == "ch_backup":
+        cb = load_channel_backup()
+        txt = "💾 **Backup Channels**\n\n"
+        channels = cb.get('backup_channels', [])
+        if channels:
+            for i, ch in enumerate(channels, 1):
+                txt += f"{i}. {ch.get('name','?')} (`{ch.get('id','?')}`)\n"
+        else:
+            txt += "❌ None configured.\n"
+        kb = [
+            [InlineKeyboardButton("➕ Add", callback_data="ch_bk_add")],
+            [InlineKeyboardButton("🗑️ Remove", callback_data="ch_bk_rm")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_channel")]
+        ]
+        await query.edit_message_text(txt[:4000], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "ch_bk_add":
+        context.user_data['await'] = 'ch_bk_add'
+        await query.edit_message_text("💾 **Send backup channel ID or username:**\n\n📌 Example: `-1001234567890` or `@channel`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ch_backup")]]))
+
+    elif data == "ch_bk_rm":
+        context.user_data['await'] = 'ch_bk_rm'
+        await query.edit_message_text("🗑️ **Send backup channel number to remove:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ch_backup")]]))
+
+    elif data == "ch_active":
+        cb = load_channel_backup()
+        all_ch = cb.get('main_channels', []) + cb.get('backup_channels', [])
+        if not all_ch:
+            await query.edit_message_text("❌ **No channels to select!**\nAdd main/backup channels first.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_channel")]]))
+            return
+        kb = []
+        for ch in all_ch:
+            mark = "✅ " if cb.get('active_channel', {}).get('id') == ch.get('id') else ""
+            kb.append([InlineKeyboardButton(f"{mark}{ch.get('name','?')}", callback_data=f"ch_set_active_{ch.get('id','?')}")])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_channel")])
+        await query.edit_message_text("🔄 **Select active channel:**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data.startswith("ch_set_active_"):
+        ch_id = data.split('_', 3)[3]
+        cb = load_channel_backup()
+        all_ch = cb.get('main_channels', []) + cb.get('backup_channels', [])
+        for ch in all_ch:
+            if ch.get('id') == ch_id:
+                cb['active_channel'] = ch
+                save_channel_backup(cb)
+                await query.edit_message_text(f"✅ **Active channel set to: {ch.get('name','?')}**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_channel")]]))
+                return
+        await query.edit_message_text("❌ **Channel not found!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_channel")]]))
+
+    # ====== STATUS & STATS ======
+    elif data == "m_stat":
+        uptime_info = ""
+        if hasattr(context.bot_data, 'start_time'):
+            uptime = datetime.now() - context.bot_data.start_time
+            uptime_info = f"⏱️ Uptime: {uptime.days}d {uptime.seconds//3600}h\n"
+        
+        total_msgs = sum(account_stats.get(aid, {}).get('auto_sent', 0) for aid in account_stats)
+        total_spam = sum(account_stats.get(aid, {}).get('spam_sent', 0) for aid in account_stats)
+        ad_data = load_auto_delete_data()
+        deleted_count = ad_data.get('deleted_count', 0)
+        registered_chats = len(ad_data.get('chats', {}))
+        
+        customers = len(load_customers()) or len(customer_count) or 1
+        
+        txt = (
+            f"📊 **Status & Statistics**\n\n"
+            f"═══════════════════════\n"
+            f"👤 Total Users: {customers}\n"
+            f"📱 Active Accounts: {len(active_accounts)}\n"
+            f"🟢 Online Clients: {len(account_clients)}\n"
+            f"📨 Total Auto-Replies: {total_msgs}\n"
+            f"📧 Total Spam Sent: {total_spam}\n"
+            f"🗑️ Auto-Deleted Msgs: {deleted_count}\n"
+            f"💬 Registered Chats: {registered_chats}\n"
+            f"{uptime_info}"
+            f"═══════════════════════\n"
+            f"🤖 SecureBot v1.0"
+        )
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Refresh", callback_data="m_stat")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
+        ]))
 
     # ====== SETTINGS ======
     elif data == "m_set":
-        bp = "ON" if get_setting('block_photo_enabled', True) else "OFF"
-        fs = "ON" if get_setting('flood_slow_mode', True) else "OFF"
-        ln = "ON" if logout_notification_enabled else "OFF"
-        has_qr = "✅ Set" if QR_CODE_FILE.exists() else "❌ Not set"
-        txt = f"Settings\nBlock Photo: {bp}\nFlood Slow: {fs}\nLogout Alert: {ln}\nQR Code: {has_qr}"
+        auto_del_en = "✅" if load_auto_delete_data().get('enabled', False) else "❌"
+        auto_del_sec = int(load_auto_delete_data().get('seconds', 86400))
+        auto_del_time = f"{auto_del_sec//86400}d" if auto_del_sec >= 86400 else f"{auto_del_sec//3600}h" if auto_del_sec >= 3600 else f"{auto_del_sec}s"
+        notif = "✅" if logout_notification_enabled else "❌"
+        
+        txt = (
+            f"⚙️ **Settings**\n\n"
+            f"🗑️ Auto Delete: {auto_del_en} ({auto_del_time})\n"
+            f"🔔 Logout Notify: {notif}\n"
+            f"👤 Admin Count: {len(ADMIN_IDS)}\n"
+            f"═══════════════════════\n"
+            f"📌 Configure bot behavior"
+        )
         kb = [
-            [InlineKeyboardButton(f"Block Photo: {bp}", callback_data="st_bp")],
-            [InlineKeyboardButton(f"Flood Slow: {fs}", callback_data="st_fs")],
-            [InlineKeyboardButton(f"Logout Alert: {ln}", callback_data="st_ln")],
-            [InlineKeyboardButton("Payment Settings", callback_data="st_pay")],
-            [InlineKeyboardButton(f"QR Code {has_qr}", callback_data="st_qr")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
+            [InlineKeyboardButton(f"🗑️ Auto-Delete: {auto_del_en}", callback_data="set_ad")],
+            [InlineKeyboardButton("⏱️ Set Auto-Delete Time", callback_data="set_ad_time")],
+            [InlineKeyboardButton(f"🔔 Notifications: {notif}", callback_data="set_notif")],
+            [InlineKeyboardButton("📝 Ignored Messages", callback_data="set_ignored")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == "st_bp":
-        cur = get_setting('block_photo_enabled', True)
-        set_setting('block_photo_enabled', not cur)
-        bp = "ON" if not cur else "OFF"
-        fs = "ON" if get_setting('flood_slow_mode', True) else "OFF"
-        ln = "ON" if logout_notification_enabled else "OFF"
-        has_qr = "✅ Set" if QR_CODE_FILE.exists() else "❌ Not set"
-        txt = f"Settings\nBlock Photo: {bp}\nFlood Slow: {fs}\nLogout Alert: {ln}\nQR Code: {has_qr}"
-        kb = [
-            [InlineKeyboardButton(f"Block Photo: {bp}", callback_data="st_bp")],
-            [InlineKeyboardButton(f"Flood Slow: {fs}", callback_data="st_fs")],
-            [InlineKeyboardButton(f"Logout Alert: {ln}", callback_data="st_ln")],
-            [InlineKeyboardButton("Payment Settings", callback_data="st_pay")],
-            [InlineKeyboardButton(f"QR Code {has_qr}", callback_data="st_qr")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "st_fs":
-        cur = get_setting('flood_slow_mode', True)
-        set_setting('flood_slow_mode', not cur)
-        bp = "ON" if get_setting('block_photo_enabled', True) else "OFF"
-        fs = "ON" if not cur else "OFF"
-        ln = "ON" if logout_notification_enabled else "OFF"
-        has_qr = "✅ Set" if QR_CODE_FILE.exists() else "❌ Not set"
-        txt = f"Settings\nBlock Photo: {bp}\nFlood Slow: {fs}\nLogout Alert: {ln}\nQR Code: {has_qr}"
-        kb = [
-            [InlineKeyboardButton(f"Block Photo: {bp}", callback_data="st_bp")],
-            [InlineKeyboardButton(f"Flood Slow: {fs}", callback_data="st_fs")],
-            [InlineKeyboardButton(f"Logout Alert: {ln}", callback_data="st_ln")],
-            [InlineKeyboardButton("Payment Settings", callback_data="st_pay")],
-            [InlineKeyboardButton(f"QR Code {has_qr}", callback_data="st_qr")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "st_ln":
-        logout_notification_enabled = not logout_notification_enabled
-        bp = "ON" if get_setting('block_photo_enabled', True) else "OFF"
-        fs = "ON" if get_setting('flood_slow_mode', True) else "OFF"
-        ln = "ON" if logout_notification_enabled else "OFF"
-        has_qr = "✅ Set" if QR_CODE_FILE.exists() else "❌ Not set"
-        txt = f"Settings\nBlock Photo: {bp}\nFlood Slow: {fs}\nLogout Alert: {ln}\nQR Code: {has_qr}"
-        kb = [
-            [InlineKeyboardButton(f"Block Photo: {bp}", callback_data="st_bp")],
-            [InlineKeyboardButton(f"Flood Slow: {fs}", callback_data="st_fs")],
-            [InlineKeyboardButton(f"Logout Alert: {ln}", callback_data="st_ln")],
-            [InlineKeyboardButton("Payment Settings", callback_data="st_pay")],
-            [InlineKeyboardButton(f"QR Code {has_qr}", callback_data="st_qr")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "st_pay":
-        upi = get_setting('upi_id', '')
-        paytm = get_setting('paytm_num', '')
-        txt = f"Payment Settings\nUPI: {upi or '❌ Not set'}\nPayTm: {paytm or '❌ Not set'}"
-        kb = [
-            [InlineKeyboardButton("Set UPI", callback_data="st_upi")],
-            [InlineKeyboardButton("Set PayTm", callback_data="st_paytm")],
-            [InlineKeyboardButton("Back", callback_data="m_set")]
-        ]
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "st_upi":
-        context.user_data['await'] = 'upi'
-        await query.edit_message_text("Enter UPI ID:\nuser@upi", parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="st_pay")]]))
-
-    elif data == "st_paytm":
-        context.user_data['await'] = 'paytm'
-        await query.edit_message_text("Enter PayTm number:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="st_pay")]]))
-
-    elif data == "st_qr":
-        context.user_data['await'] = 'qr_code'
-        await query.edit_message_text("Send QR Code image:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_set")]]))
-
-    # ====== STATUS ======
-    elif data == "m_stat":
-        ar = "ON" if auto_reply_enabled else "OFF"
-        gs = "ON" if group_spam_enabled else "OFF"
-        ttl_auto = sum(account_stats.get(a['id'], {}).get('auto_sent', 0) for a in active_accounts)
-        ttl_spam = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
-        spm_act = sum(1 for a in active_accounts if account_stats.get(a['id'], {}).get('spam_running', False))
+    elif data == "set_ad":
         ad_data = load_auto_delete_data()
-        deleted = ad_data.get('deleted_count', 0)
-        txt = f"Status\n\nAuto Reply: {ar}\nSpam: {gs}\nActive Accounts: {len(active_accounts)}\nSpamming Now: {spm_act}\nAuto Sent: {ttl_auto}\nSpam Sent: {ttl_spam}\nCustomers: {len(customer_count)}\nAuto Deleted: {deleted} messages"
-        await query.edit_message_text(txt, parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Refresh", callback_data="m_stat"), InlineKeyboardButton("Main Menu", callback_data="main")]]))
+        ad_data["enabled"] = not ad_data.get("enabled", False)
+        save_auto_delete_data(ad_data)
+        await query.edit_message_text(f"{'✅ **Auto-Delete ON**' if ad_data['enabled'] else '❌ **Auto-Delete OFF**'}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
 
-    # ====== ADMIN PANEL ======
+    elif data == "set_ad_time":
+        context.user_data['await'] = 'set_ad_time'
+        sec = int(load_auto_delete_data().get('seconds', 86400))
+        time_str = f"{sec//86400}d" if sec >= 86400 else f"{sec//3600}h" if sec >= 3600 else f"{sec}s"
+        await query.edit_message_text(
+            "⏱️ **Enter auto-delete timer in seconds:**\n\n"
+            "📌 Range: `1` (1s) to `2592000` (30 days)\n"
+            f"📌 Current: `{sec}s` ({time_str})",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]])
+        )
+
+    elif data == "set_notif":
+        global logout_notification_enabled
+        logout_notification_enabled = not logout_notification_enabled
+        set_setting('logout_notification', logout_notification_enabled)
+        await query.edit_message_text(f"{'✅ **Logout notifications ON**' if logout_notification_enabled else '❌ **Logout notifications OFF**'}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
+
+    elif data == "set_ignored":
+        context.user_data['await'] = 'set_ignored'
+        cur = get_setting('ignored_messages', '') or 'None'
+        await query.edit_message_text(f"📝 **Ignored Messages**\n\nBot will NOT auto-reply to these.\n\n📌 Send keyword(s) (one per line):\n📌 Current: `{cur}`\n📌 Send `clear` to reset.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
+
+    # ====== ADMIN PANEL (OWNER ONLY) ======
     elif data == "m_adm":
-        txt = "Admin Panel"
+        if user_id != OWNER_ID:
+            return
+        txt = (
+            "👑 **Admin Panel**\n\n"
+            f"📊 Admins: {len(ADMIN_IDS)}\n"
+            f"👤 Owner: {OWNER_ID}\n"
+            f"📱 Active Accounts: {len(active_accounts)}\n"
+            f"═══════════════════════\n"
+            f"📌 Manage bot administrators"
+        )
         kb = [
-            [InlineKeyboardButton("Broadcast", callback_data="ad_bc")],
-            [InlineKeyboardButton("View Logs", callback_data="ad_lg")],
-            [InlineKeyboardButton("Restart Bot", callback_data="ad_rt")],
-            [InlineKeyboardButton("Main Menu", callback_data="main")]
+            [InlineKeyboardButton("➕ Add Admin", callback_data="ad_add")],
+            [InlineKeyboardButton("🗑️ Remove Admin", callback_data="ad_remove")],
+            [InlineKeyboardButton("📋 List Admins", callback_data="ad_list")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
         ]
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == "ad_bc":
-        context.user_data['await'] = 'broadcast'
-        await query.edit_message_text("Send broadcast message:\n\nWill be sent to all customers!",
-            parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_adm")]]))
-
-    elif data == "ad_lg":
-        log_path = Path('bot.log')
-        if log_path.exists():
-            with open(log_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()[-20:]
-            txt = "Last 20 Logs\n\n" + "".join(lines[-500:])
-        else:
-            txt = "No log file found."
-        await query.edit_message_text(txt[:4000],
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_adm")]]))
-
-    elif data == "ad_rt":
-        await query.edit_message_text("Restarting...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-
-    else:
-        await query.edit_message_text(f"Unknown option: {data}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main")]]))
-
-
-# ====== TEXT MESSAGE HANDLER ======
-async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global auto_reply_enabled, group_spam_enabled, customer_count, account_clients, active_accounts, account_stats, account_stop_flags
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID and user_id not in ADMIN_IDS:
-        return
-    text = update.message.text.strip()
-    await_state = context.user_data.get('await')
-    if not await_state:
-        if text == '/menu':
-            await show_main_menu(update, context)
-        elif text.startswith('/add_reply'):
-            parts = text.split(' ', 2)
-            if len(parts) >= 3:
-                replies = load_replies()
-                replies.append({'keyword': parts[1].lower(), 'reply': parts[2], 'added_at': datetime.now().isoformat()})
-                save_replies(replies)
-                await update.message.reply_text(f"✅ Reply added: {parts[1]} → {parts[2][:30]}", parse_mode='Markdown')
-            else:
-                await update.message.reply_text("❌ Usage: /add_reply keyword reply_text")
-        elif text == '/new_join_link':
-            context.user_data['await'] = 'harden_link_add'
-            await update.message.reply_text("Send group invite link:", parse_mode='Markdown')
-        elif text == '/restart' and user_id == OWNER_ID:
-            await update.message.reply_text("Restarting...")
-            os.execv(sys.executable, [sys.executable] + sys.argv)
-        else:
-            await update.message.reply_text("Unknown command. Use /menu")
-        return
-
-    # Handle all await states
-    if await_state == 'welcome_text':
-        set_setting('welcome_message', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text("✅ Welcome text 1 updated!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_welcome")]]))
-
-    elif await_state == 'welcome_text_2':
-        set_setting('welcome_message_2', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text("✅ Welcome text 2 updated!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_welcome")]]))
-
-    elif await_state == 'wait_time':
-        try:
-            val = max(0, min(600, int(text)))
-            set_setting('wait_time', val)
-            context.user_data.pop('await', None)
-            await update.message.reply_text(f"✅ Wait time: {val}s",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_waittime")]]))
-        except:
-            await update.message.reply_text("❌ Enter a number (0-600)!")
-
-    elif await_state == 'typing_time':
-        try:
-            val = int(text)
-            if 0 <= val <= 300:
-                set_setting('typing_duration', val)
-                context.user_data.pop('await', None)
-                await update.message.reply_text(f"✅ Typing: {val}s",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_typing")]]))
-            else:
-                await update.message.reply_text("❌ Enter between 0-300!")
-        except:
-            await update.message.reply_text("❌ Enter a number!")
-
-    elif await_state == 'ignore':
-        set_setting('ignored_messages', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text("✅ Ignore messages updated!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_ar")]]))
-
-    elif await_state == 'harden_name':
-        set_setting('new_account_name', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text(f"✅ Name set: {text}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
-
-    elif await_state == 'harden_bio':
-        set_setting('new_account_bio', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text(f"✅ Bio set!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_harden")]]))
-
-    elif await_state == 'harden_link_add':
-        links = load_autojoin_links()
-        links.append(text)
-        save_autojoin_links(links)
-        context.user_data.pop('await', None)
-        await update.message.reply_text(f"✅ Link added!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_links")]]))
-
-    elif await_state == 'harden_ad_time':
-        try:
-            val = int(text)
-            if 1 <= val <= 2592000:
-                set_setting('auto_delete_seconds', val)
-                context.user_data.pop('await', None)
-                time_str = f"{val//86400}d" if val >= 86400 else f"{val//3600}h" if val >= 3600 else f"{val}s"
-                await update.message.reply_text(f"✅ Auto-delete timer: {val}s ({time_str})",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_config")]]))
-            else:
-                await update.message.reply_text("❌ Enter between 1-2592000 seconds (1s - 30 days)!")
-        except:
-            await update.message.reply_text("❌ Enter a number!")
-
-    elif await_state == 'set_proxy':
-        aid = context.user_data.get('proxy_account_id', '')
-        if text.lower() == 'remove':
-            remove_account_proxy(aid)
-            context.user_data.pop('await', None)
-            context.user_data.pop('proxy_account_id', None)
-            await update.message.reply_text("✅ Proxy removed! Account will use default proxy.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_proxy")]]))
-        else:
-            try:
-                # Parse proxy string: type://user:pass@host:port
-                proto_part = text.split('://')
-                if len(proto_part) != 2:
-                    raise ValueError("Invalid format")
-                proxy_type = proto_part[0]
-                auth_host = proto_part[1]
-                
-                user = None
-                password = None
-                host_port = auth_host
-                
-                if '@' in auth_host:
-                    auth_part, host_part = auth_host.split('@', 1)
-                    if ':' in auth_part:
-                        user, password = auth_part.split(':', 1)
-                    else:
-                        user = auth_part
-                    host_port = host_part
-                
-                host_parts = host_port.split(':')
-                host = host_parts[0]
-                port = int(host_parts[1]) if len(host_parts) > 1 else 9050
-                
-                proxy_config = {
-                    'proxy_type': proxy_type,
-                    'addr': host,
-                    'port': port,
-                    'username': user or '',
-                    'password': password or ''
-                }
-                save_account_proxy(aid, proxy_config)
-                context.user_data.pop('await', None)
-                context.user_data.pop('proxy_account_id', None)
-                await update.message.reply_text(f"✅ Proxy set for account!\n{proxy_type}://{user or 'none'}@{host}:{port}",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_proxy")]]))
-            except Exception as e:
-                await update.message.reply_text(f"❌ Invalid proxy format: {str(e)[:50]}\n\nFormat: type://user:pass@host:port\nExample: socks5://user:pass@127.0.0.1:9050")
-
-    elif await_state == 'ch_add_main':
-        ch_data = load_channel_backup()
-        ch_data['main_channels'].append({'id': text, 'title': text, 'type': 'main'})
-        save_channel_backup(ch_data)
-        context.user_data.pop('await', None)
-        await update.message.reply_text(f"✅ Main channel added!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_channel")]]))
-
-    elif await_state == 'ch_add_backup':
-        ch_data = load_channel_backup()
-        ch_data['backup_channels'].append({'id': text, 'title': text, 'type': 'backup'})
-        save_channel_backup(ch_data)
-        context.user_data.pop('await', None)
-        await update.message.reply_text(f"✅ Backup channel added!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_channel")]]))
-
-    elif await_state == 'upi':
-        set_setting('upi_id', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text("✅ UPI ID set!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="st_pay")]]))
-
-    elif await_state == 'paytm':
-        set_setting('paytm_num', text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text("✅ PayTm number set!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="st_pay")]]))
-
-    elif await_state == 'broadcast':
-        context.user_data.pop('await', None)
-        msg = f"BROADCAST\n\n{text}"
-        sent = 0
-        for uid in customer_count:
-            try:
-                await context.bot.send_message(chat_id=int(uid), text=msg)
-                sent += 1
-                await asyncio.sleep(0.1)
-            except:
-                pass
-        await update.message.reply_text(f"✅ Sent to {sent} customers!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_adm")]]))
-
-    elif await_state == 'gs_msg_add':
-        add_spam_message(text)
-        context.user_data.pop('await', None)
-        await update.message.reply_text("✅ Spam message added!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="gs_msg")]]))
-
-    elif await_state == 'ac_ph':
-        context.user_data['phone'] = text
-        context.user_data['await'] = 'ac_otp'
-        try:
-            ac_api_id = int(os.environ.get('API_ID', str(DEFAULT_API_ID)))
-            ac_api_hash = os.environ.get('API_HASH', DEFAULT_API_HASH)
-            if not ac_api_id or not ac_api_hash:
-                await update.message.reply_text(
-                    "❌ API_ID or API_HASH not set!\n\nSet in Environment Variables:\nAPI_ID = your ID\nAPI_HASH = your hash")
-                context.user_data.pop('await', None)
-                return
-            client = TelegramClient(StringSession(), ac_api_id, ac_api_hash)
-            await client.connect()
-            send_code = await client.send_code_request(text)
-            context.user_data['ac_client'] = client
-            context.user_data['ac_phone_code_hash'] = send_code.phone_code_hash
-            await update.message.reply_text(f"✅ OTP sent to {text}\n\nEnter OTP:")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Failed: {str(e)[:100]}")
-            context.user_data.pop('await', None)
-
-    elif await_state == 'ac_otp':
-        otp = text.replace(' ', '')
-        client = context.user_data.get('ac_client')
-        phone = context.user_data.get('phone', '')
-        pch = context.user_data.get('ac_phone_code_hash', '')
-        if not client:
-            await update.message.reply_text("❌ Session expired! Start again.")
-            context.user_data.pop('await', None)
+    elif data == "ad_add":
+        if user_id != OWNER_ID:
             return
+        context.user_data['await'] = 'admin_add'
+        await query.edit_message_text("➕ **Send Telegram User ID** to add as admin:\n\n📌 You can get user ID from @userinfobot", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+
+    elif data == "ad_remove":
+        if user_id != OWNER_ID:
+            return
+        if not ADMIN_IDS:
+            await query.edit_message_text("❌ **No admins to remove!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+            return
+        txt = "🗑️ **Select admin to remove:**\n\n"
+        kb = []
+        for aid in ADMIN_IDS:
+            txt += f"• `{aid}`\n"
+            kb.append([InlineKeyboardButton(f"🗑️ {aid}", callback_data=f"ad_rem_{aid}")])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_adm")])
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data.startswith("ad_rem_"):
+        if user_id != OWNER_ID:
+            return
+        rem_id = int(data.split('_')[2])
+        if rem_id == OWNER_ID:
+            await query.edit_message_text("❌ **Cannot remove yourself!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+            return
+        ADMIN_IDS = [x for x in ADMIN_IDS if x != rem_id]
+        set_setting('admin_ids', ADMIN_IDS)
+        await query.edit_message_text(f"✅ **Admin `{rem_id}` removed!**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+
+    elif data == "ad_list":
+        if user_id != OWNER_ID:
+            return
+        txt = f"👑 **Owner:** `{OWNER_ID}`\n\n**Admins:**\n"
+        if ADMIN_IDS:
+            for aid in ADMIN_IDS:
+                txt += f"• `{aid}`\n"
+        else:
+            txt += "❌ None\n"
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+async def process_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text input for various bot configuration states."""
+    global auto_reply_enabled, active_accounts, account_clients, account_id_counter, ADMIN_IDS
+    
+    user = update.effective_user
+    if user.id != OWNER_ID and user.id not in ADMIN_IDS:
+        return
+    
+    text = update.message.text.strip()
+    await_state = context.user_data.get('await', None)
+    
+    if not await_state:
+        return
+    
+    # ====== ACCOUNT MANAGEMENT ======
+    if await_state == 'ac_ph':
+        phone = text.strip()
+        if not phone.startswith('+'):
+            phone = '+' + phone
+        
+        context.user_data['temp_phone'] = phone
+        context.user_data['await'] = 'ac_otp'
+        
+        # Create client and send OTP
         try:
-            await client.sign_in(phone=phone, code=otp, phone_code_hash=pch)
-            me = await client.get_me()
-            session_str = client.session.save()
-            name = me.first_name or 'Unknown'
+            phone_num = phone
+            client = TelegramClient(
+                StringSession(),
+                API_ID or DEFAULT_API_ID,
+                API_HASH or DEFAULT_API_HASH,
+                device_model="SecureBot",
+                system_version="4.16.30-vx",
+                app_version="1.0.0"
+            )
+            await client.connect()
+            
+            sent = await client.send_code_request(phone_num)
+            context.user_data['temp_client'] = client
+            context.user_data['temp_phone_code_hash'] = sent.phone_code_hash
+            
+            await update.message.reply_text(
+                f"📱 **OTP Sent to:** `{phone}`\n\n"
+                "📌 Please enter the OTP code you received.\n"
+                "📌 If using 2FA, enter password after OTP.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="m_acc")]])
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ **Error:** `{str(e)[:200]}`", parse_mode='Markdown')
+            context.user_data['await'] = None
+        
+        return
+    
+    elif await_state == 'ac_otp':
+        otp = text.strip()
+        temp_client = context.user_data.get('temp_client')
+        phone = context.user_data.get('temp_phone')
+        phone_code_hash = context.user_data.get('temp_phone_code_hash')
+        
+        if not temp_client:
+            await update.message.reply_text("❌ **Session expired.** Start again.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Add Phone", callback_data="ac_ph")]]))
+            context.user_data['await'] = None
+            return
+        
+        try:
+            await temp_client.sign_in(phone=phone, code=otp, phone_code_hash=phone_code_hash)
+            me = await temp_client.get_me()
+            
+            # Save account
+            aid = gen_acc_id()
             acc = {
-                'id': gen_acc_id(),
-                'name': name,
-                'user_id': me.id,
+                'id': aid,
+                'name': me.first_name or 'User',
                 'phone': phone,
-                'session': session_str,
-                'api_id': context.user_data.get('ac_api_id', DEFAULT_API_ID),
-                'api_hash': context.user_data.get('ac_api_hash', DEFAULT_API_HASH),
-                'proxy': None,
-                'enabled': True,
+                'user_id': user.id,
+                'api_id': API_ID or DEFAULT_API_ID,
+                'api_hash': API_HASH or DEFAULT_API_HASH,
+                'session': temp_client.session.save(),
                 'is_backup': False,
-                'added_at': datetime.now().isoformat()
+                'created_at': datetime.now().isoformat(),
+                'last_active': datetime.now().isoformat()
             }
             add_account_data(acc)
-            await client.disconnect()
-            context.user_data.pop('await', None)
-            context.user_data.pop('ac_client', None)
-            context.user_data.pop('phone', None)
-            await update.message.reply_text(f"✅ Account added!\n👤 {name}\n📱 {phone}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
-            try:
-                n_client = await start_account(acc)
-                if n_client:
-                    active_accounts.append(acc)
-                    account_clients[acc['id']] = n_client
-                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                    account_stop_flags[acc['id']] = False
-                    if auto_reply_enabled:
-                        await setup_auto_reply_for_account(acc['id'], n_client)
-            except:
-                pass
+            active_accounts.append(acc)
+            account_clients[aid] = temp_client
+            
+            context.user_data['await'] = None
+            del context.user_data['temp_client']
+            del context.user_data['temp_phone']
+            del context.user_data['temp_phone_code_hash']
+            
+            await update.message.reply_text(
+                f"✅ **Account Added!**\n\n"
+                f"👤 Name: {me.first_name}\n"
+                f"📱 Phone: {phone}\n"
+                f"🆔 ID: {aid}\n\n"
+                f"🟢 Account is now active.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Accounts", callback_data="m_acc")]])
+            )
+            
         except SessionPasswordNeededError:
             context.user_data['await'] = 'ac_2fa'
-            await update.message.reply_text("🔐 2FA password required:")
+            await update.message.reply_text("🔑 **2FA Password Required**\n\n📌 Enter your Telegram 2FA password:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="m_acc")]]))
+        
         except PhoneCodeInvalidError:
-            await update.message.reply_text("❌ Invalid OTP! Try again:")
+            await update.message.reply_text("❌ **Invalid OTP!** Try again.", parse_mode='Markdown')
+        
         except PhoneCodeExpiredError:
-            await update.message.reply_text("❌ OTP expired. Start again")
-            context.user_data.pop('await', None)
-
+            await update.message.reply_text("❌ **OTP Expired!** Start again.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Add Phone", callback_data="ac_ph")]]))
+            context.user_data['await'] = None
+        
+        except Exception as e:
+            await update.message.reply_text(f"❌ **Error:** `{str(e)[:200]}`", parse_mode='Markdown')
+            context.user_data['await'] = None
+        
+        return
+    
     elif await_state == 'ac_2fa':
-        client = context.user_data.get('ac_client')
-        phone = context.user_data.get('phone', '')
-        if not client:
-            await update.message.reply_text("❌ Session expired!")
-            context.user_data.pop('await', None)
+        password = text.strip()
+        temp_client = context.user_data.get('temp_client')
+        phone = context.user_data.get('temp_phone')
+        
+        if not temp_client:
+            await update.message.reply_text("❌ **Session expired.**", parse_mode='Markdown')
+            context.user_data['await'] = None
             return
+        
         try:
-            await client.sign_in(password=text)
-            me = await client.get_me()
-            session_str = client.session.save()
-            name = me.first_name or 'Unknown'
+            await temp_client.sign_in(password=password)
+            me = await temp_client.get_me()
+            
+            aid = gen_acc_id()
             acc = {
-                'id': gen_acc_id(),
-                'name': name,
-                'user_id': me.id,
+                'id': aid,
+                'name': me.first_name or 'User',
                 'phone': phone,
-                'session': session_str,
-                'api_id': context.user_data.get('ac_api_id', DEFAULT_API_ID),
-                'api_hash': context.user_data.get('ac_api_hash', DEFAULT_API_HASH),
-                'proxy': None,
-                'enabled': True,
+                'user_id': user.id,
+                'api_id': API_ID or DEFAULT_API_ID,
+                'api_hash': API_HASH or DEFAULT_API_HASH,
+                'session': temp_client.session.save(),
                 'is_backup': False,
-                'added_at': datetime.now().isoformat()
+                'created_at': datetime.now().isoformat(),
+                'last_active': datetime.now().isoformat()
             }
             add_account_data(acc)
-            await client.disconnect()
-            context.user_data.pop('await', None)
-            context.user_data.pop('ac_client', None)
-            context.user_data.pop('phone', None)
-            await update.message.reply_text(f"✅ Account added!\n👤 {name}\n📱 {phone}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
-            try:
-                n_client = await start_account(acc)
-                if n_client:
-                    active_accounts.append(acc)
-                    account_clients[acc['id']] = n_client
-                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                    account_stop_flags[acc['id']] = False
-                    if auto_reply_enabled:
-                        await setup_auto_reply_for_account(acc['id'], n_client)
-            except:
-                pass
+            active_accounts.append(acc)
+            account_clients[aid] = temp_client
+            
+            context.user_data['await'] = None
+            del context.user_data['temp_client']
+            del context.user_data['temp_phone']
+            
+            await update.message.reply_text(
+                f"✅ **Account Added!**\n\n"
+                f"👤 Name: {me.first_name}\n"
+                f"📱 Phone: {phone}\n"
+                f"🆔 ID: {aid}\n\n"
+                f"🟢 Account is now active.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Accounts", callback_data="m_acc")]])
+            )
         except Exception as e:
-            await update.message.reply_text(f"❌ 2FA failed: {str(e)[:100]}")
-            context.user_data.pop('await', None)
-
+            await update.message.reply_text(f"❌ **2FA Error:** `{str(e)[:200]}`", parse_mode='Markdown')
+        
+        return
+    
     elif await_state == 'ac_ss':
-        if len(text) < 10:
-            await update.message.reply_text("❌ Invalid session string!")
-            return
+        session_str = text.strip()
         try:
-            session_test = StringSession(text)
-            client = TelegramClient(session_test, DEFAULT_API_ID, DEFAULT_API_HASH)
+            client = TelegramClient(StringSession(session_str), API_ID or DEFAULT_API_ID, API_HASH or DEFAULT_API_HASH)
             await client.connect()
             me = await client.get_me()
-            if me:
-                name = me.first_name or 'Unknown'
-                phone = me.phone or 'N/A'
-                acc = {
-                    'id': gen_acc_id(),
-                    'name': name,
-                    'user_id': me.id,
-                    'phone': phone,
-                    'session': text,
-                    'api_id': DEFAULT_API_ID,
-                    'api_hash': DEFAULT_API_HASH,
-                    'proxy': None,
-                    'enabled': True,
-                    'is_backup': False,
-                    'added_at': datetime.now().isoformat()
-                }
-                add_account_data(acc)
-                await client.disconnect()
-                context.user_data.pop('await', None)
-                await update.message.reply_text(f"✅ Account added!\n👤 {name}\n📱 {phone}",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_acc")]]))
-                try:
-                    n_client = await start_account(acc)
-                    if n_client:
-                        active_accounts.append(acc)
-                        account_clients[acc['id']] = n_client
-                        account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                        account_stop_flags[acc['id']] = False
-                        if auto_reply_enabled:
-                            await setup_auto_reply_for_account(acc['id'], n_client)
-                except:
-                    pass
-            else:
-                await update.message.reply_text("❌ Could not get user info!")
+            if not me:
+                await update.message.reply_text("❌ **Invalid session string!**", parse_mode='Markdown')
+                return
+            
+            phone = me.phone or f"user_{me.id}"
+            aid = gen_acc_id()
+            acc = {
+                'id': aid,
+                'name': me.first_name or 'User',
+                'phone': f"+{phone}" if not str(phone).startswith('+') else phone,
+                'user_id': user.id,
+                'api_id': API_ID or DEFAULT_API_ID,
+                'api_hash': API_HASH or DEFAULT_API_HASH,
+                'session': session_str,
+                'is_backup': False,
+                'created_at': datetime.now().isoformat(),
+                'last_active': datetime.now().isoformat()
+            }
+            add_account_data(acc)
+            active_accounts.append(acc)
+            account_clients[aid] = client
+            
+            context.user_data['await'] = None
+            await update.message.reply_text(
+                f"✅ **Account Added via Session!**\n\n"
+                f"👤 Name: {me.first_name}\n"
+                f"🆔 ID: {aid}\n\n"
+                f"🟢 Account is now active.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Accounts", callback_data="m_acc")]])
+            )
         except Exception as e:
-            await update.message.reply_text(f"❌ Invalid session: {str(e)[:100]}")
-        finally:
-            context.user_data.pop('await', None)
-
-    elif await_state == 'ac_bk_ss':
-        if len(text) < 10:
-            await update.message.reply_text("❌ Invalid session string!")
+            await update.message.reply_text(f"❌ **Error:** `{str(e)[:200]}`", parse_mode='Markdown')
+        
+        return
+    
+    # ====== HARDENING TEXT INPUTS ======
+    elif await_state == 'harden_name':
+        if text.lower() == 'clear':
+            set_setting('new_account_name', '')
+        else:
+            set_setting('new_account_name', text)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ **Name set to:** `{text if text.lower() != 'clear' else '(reset)'}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
+        return
+    
+    elif await_state == 'harden_bio':
+        if text.lower() == 'clear':
+            set_setting('new_account_bio', '')
+        else:
+            set_setting('new_account_bio', text)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ **Bio set to:** `{text if text.lower() != 'clear' else '(reset)'}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_harden")]]))
+        return
+    
+    elif await_state == 'harden_ad_time':
+        try:
+            seconds = int(text.strip())
+            seconds = max(1, min(seconds, 2592000))  # 1s to 30 days
+            set_setting('auto_delete_seconds', seconds)
+            time_str = f"{seconds//86400}d" if seconds >= 86400 else f"{seconds//3600}h" if seconds >= 3600 else f"{seconds}s"
+            context.user_data['await'] = None
+            await update.message.reply_text(f"✅ **Auto-delete timer set to:** `{seconds}s` ({time_str})", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_config")]]))
+        except ValueError:
+            await update.message.reply_text("❌ **Invalid number!** Enter seconds (e.g., 86400)", parse_mode='Markdown')
+        return
+    
+    elif await_state == 'harden_link_add':
+        links = load_autojoin_links()
+        links.append(text.strip())
+        save_autojoin_links(links)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ **Link added!**\n\n📌 Total links: {len(links)}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_links")]]))
+        return
+    
+    elif await_state == 'set_proxy':
+        aid = context.user_data.get('proxy_account_id')
+        if not aid:
+            await update.message.reply_text("❌ **Session expired.**", parse_mode='Markdown')
+            context.user_data['await'] = None
+            return
+        
+        if text.strip().lower() == 'remove':
+            remove_account_proxy(aid)
+            context.user_data['await'] = None
+            await update.message.reply_text(f"🗑️ **Proxy removed for account!**\n✅ Will use default proxy settings.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_proxy")]]))
+            return
+        
+        # Parse proxy string: type://user:pass@host:port
+        try:
+            parsed = urlparse(text.strip())
+            proxy_type = parsed.scheme or 'socks5'
+            host = parsed.hostname or '127.0.0.1'
+            port = parsed.port or 9050
+            username = parsed.username
+            password = parsed.password
+            
+            proxy_config = {
+                'proxy_type': proxy_type,
+                'addr': host,
+                'port': port,
+                'username': username,
+                'password': password
+            }
+            save_account_proxy(aid, proxy_config)
+            context.user_data['await'] = None
+            await update.message.reply_text(f"✅ **Proxy set!**\n\n`{proxy_type}://{username or 'none'}@{host}:{port}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_proxy")]]))
+        except Exception as e:
+            await update.message.reply_text(f"❌ **Invalid proxy format!**\n\n📌 Use: `type://user:pass@host:port`\n\nError: `{str(e)[:50]}`", parse_mode='Markdown')
+        return
+    
+    # ====== AUTO REPLY TEXT INPUTS ======
+    elif await_state == 'ar_welcome':
+        if text.lower() == 'clear':
+            set_setting('welcome_message', '')
+            await update.message.reply_text("🗑️ **Welcome message cleared!**", parse_mode='Markdown')
+        else:
+            set_setting('welcome_message', text)
+            await update.message.reply_text(f"✅ **Welcome message set!**\n\n`{text[:100]}`", parse_mode='Markdown')
+        context.user_data['await'] = None
+        await update.message.reply_text("🔙 Back to Auto Reply", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+        return
+    
+    elif await_state == 'ar_welcome2':
+        if text.lower() == 'clear':
+            set_setting('welcome_message_2', '')
+            await update.message.reply_text("🗑️ **Second message cleared!**", parse_mode='Markdown')
+        else:
+            set_setting('welcome_message_2', text)
+            await update.message.reply_text(f"✅ **Second message set!**\n\n`{text[:100]}`", parse_mode='Markdown')
+        context.user_data['await'] = None
+        await update.message.reply_text("🔙 Back to Auto Reply", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+        return
+    
+    elif await_state == 'ar_wait':
+        try:
+            wait = int(text.strip())
+            wait = max(1, min(wait, 30))
+            set_setting('wait_time', wait)
+            context.user_data['await'] = None
+            await update.message.reply_text(f"✅ **Wait time set to:** `{wait}s`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+        except ValueError:
+            await update.message.reply_text("❌ **Invalid number!** Enter seconds (1-30)", parse_mode='Markdown')
+        return
+    
+    elif await_state == 'ar_typing':
+        try:
+            dur = int(text.strip())
+            dur = max(1, min(dur, 8))
+            set_setting('typing_duration', dur)
+            context.user_data['await'] = None
+            await update.message.reply_text(f"✅ **Typing duration set to:** `{dur}s`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+        except ValueError:
+            await update.message.reply_text("❌ **Invalid number!** Enter seconds (1-8)", parse_mode='Markdown')
+        return
+    
+    elif await_state == 'ar_kw_add':
+        if '|' in text:
+            parts = text.split('|', 1)
+            keyword = parts[0].strip()
+            reply = parts[1].strip()
+            replies = load_replies()
+            replies.append({'keyword': keyword, 'reply': reply})
+            save_replies(replies)
+            context.user_data['await'] = None
+            await update.message.reply_text(f"✅ **Keyword added!**\n\n`{keyword}` → `{reply[:50]}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_keywords")]]))
+        else:
+            await update.message.reply_text("❌ **Format error!** Use: `keyword | reply text`", parse_mode='Markdown')
+        return
+    
+    elif await_state == 'ar_kw_del':
+        try:
+            idx = int(text.strip()) - 1
+            replies = load_replies()
+            if 0 <= idx < len(replies):
+                removed = replies.pop(idx)
+                save_replies(replies)
+                context.user_data['await'] = None
+                await update.message.reply_text(f"🗑️ **Removed:** `{removed.get('keyword','?')}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_keywords")]]))
+            else:
+                await update.message.reply_text(f"❌ **Invalid number!** Enter 1-{len(replies)}", parse_mode='Markdown')
+        except ValueError:
+            await update.message.reply_text("❌ **Enter a valid number!**", parse_mode='Markdown')
+        return
+    
+    # ====== GROUP SPAM TEXT INPUTS ======
+    elif await_state == 'gs_msg_add':
+        add_spam_message(text)
+        context.user_data['await'] = None
+        msgs = load_spam_messages()
+        await update.message.reply_text(f"✅ **Message added!**\n📊 Total messages: {len(msgs)}", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_messages")]]))
+        return
+    
+    # ====== CHANNEL BACKUP TEXT INPUTS ======
+    elif await_state == 'ch_main_add':
+        ch_input = text.strip()
+        cb = load_channel_backup()
+        if 'main_channels' not in cb:
+            cb['main_channels'] = []
+        cb['main_channels'].append({'id': ch_input, 'name': ch_input})
+        save_channel_backup(cb)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ **Main channel added:** `{ch_input}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ch_main")]]))
+        return
+    
+    elif await_state == 'ch_main_rm':
+        try:
+            idx = int(text.strip()) - 1
+            cb = load_channel_backup()
+            channels = cb.get('main_channels', [])
+            if 0 <= idx < len(channels):
+                removed = channels.pop(idx)
+                cb['main_channels'] = channels
+                save_channel_backup(cb)
+                context.user_data['await'] = None
+                await update.message.reply_text(f"🗑️ **Removed:** `{removed.get('id','?')}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ch_main")]]))
+            else:
+                await update.message.reply_text(f"❌ **Invalid number!**", parse_mode='Markdown')
+        except ValueError:
+            await update.message.reply_text("❌ **Enter a valid number!**", parse_mode='Markdown')
+        return
+    
+    elif await_state == 'ch_bk_add':
+        ch_input = text.strip()
+        cb = load_channel_backup()
+        if 'backup_channels' not in cb:
+            cb['backup_channels'] = []
+        cb['backup_channels'].append({'id': ch_input, 'name': ch_input})
+        save_channel_backup(cb)
+        context.user_data['await'] = None
+        await update.message.reply_text(f"✅ **Backup channel added:** `{ch_input}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ch_backup")]]))
+        return
+    
+    elif await_state == 'ch_bk_rm':
+        try:
+            idx = int(text.strip()) - 1
+            cb = load_channel_backup()
+            channels = cb.get('backup_channels', [])
+            if 0 <= idx < len(channels):
+                removed = channels.pop(idx)
+                cb['backup_channels'] = channels
+                save_channel_backup(cb)
+                context.user_data['await'] = None
+                await update.message.reply_text(f"🗑️ **Removed:** `{removed.get('id','?')}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ch_backup")]]))
+            else:
+                await update.message.reply_text(f"❌ **Invalid number!**", parse_mode='Markdown')
+        except ValueError:
+            await update.message.reply_text("❌ **Enter a valid number!**", parse_mode='Markdown')
+        return
+    
+    # ====== SETTINGS TEXT INPUTS ======
+    elif await_state == 'set_ad_time':
+        try:
+            seconds = int(text.strip())
+            seconds = max(1, min(seconds, 2592000))
+            ad_data = load_auto_delete_data()
+            ad_data['seconds'] = seconds
+            save_auto_delete_data(ad_data)
+            context.user_data['await'] = None
+            time_str = f"{seconds//86400}d" if seconds >= 86400 else f"{seconds//3600}h" if seconds >= 3600 else f"{seconds}s"
+            await update.message.reply_text(f"✅ **Auto-delete timer set to:** `{seconds}s` ({time_str})", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
+        except ValueError:
+            await update.message.reply_text("❌ **Invalid number!**", parse_mode='Markdown')
+        return
+    
+    elif await_state == 'set_ignored':
+        if text.lower() == 'clear':
+            set_setting('ignored_messages', '')
+            await update.message.reply_text("🗑️ **Ignored messages cleared!**", parse_mode='Markdown')
+        else:
+            set_setting('ignored_messages', text)
+            await update.message.reply_text(f"✅ **Ignored messages updated!**", parse_mode='Markdown')
+        context.user_data['await'] = None
+        await update.message.reply_text("🔙 Back to Settings", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
+        return
+    
+    # ====== ADMIN PANEL (OWNER ONLY) ======
+    elif await_state == 'admin_add':
+        if user.id != OWNER_ID:
             return
         try:
-            session_test = StringSession(text)
-            client = TelegramClient(session_test, DEFAULT_API_ID, DEFAULT_API_HASH)
-            await client.connect()
-            me = await client.get_me()
-            if me:
-                name = me.first_name or 'Unknown'
-                phone = me.phone or 'N/A'
-                acc = {
-                    'id': gen_acc_id(),
-                    'name': name,
-                    'user_id': me.id,
-                    'phone': phone,
-                    'session': text,
-                    'api_id': DEFAULT_API_ID,
-                    'api_hash': DEFAULT_API_HASH,
-                    'proxy': None,
-                    'enabled': True,
-                    'is_backup': True,
-                    'added_at': datetime.now().isoformat()
-                }
-                add_account_data(acc)
-                await client.disconnect()
-                context.user_data.pop('await', None)
-                await update.message.reply_text(f"✅ Backup account added!\n👤 {name}\n📱 {phone}",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ac_bk")]]))
-            else:
-                await update.message.reply_text("❌ Could not get user info!")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Invalid session: {str(e)[:100]}")
-        finally:
-            context.user_data.pop('await', None)
-
-    else:
-        context.user_data.pop('await', None)
-        await update.message.reply_text("Unknown input. Use /menu")
-
-
-# ====== PHOTO MESSAGE HANDLER ======
-async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID and user_id not in ADMIN_IDS:
+            new_admin_id = int(text.strip())
+            if new_admin_id == OWNER_ID:
+                await update.message.reply_text("❌ **You are already the owner!**", parse_mode='Markdown')
+                return
+            if new_admin_id in ADMIN_IDS:
+                await update.message.reply_text(f"❌ **{new_admin_id} is already an admin!**", parse_mode='Markdown')
+                return
+            ADMIN_IDS.append(new_admin_id)
+            set_setting('admin_ids', ADMIN_IDS)
+            context.user_data['await'] = None
+            await update.message.reply_text(f"✅ **Admin added:** `{new_admin_id}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+        except ValueError:
+            await update.message.reply_text("❌ **Invalid User ID!**", parse_mode='Markdown')
         return
-    await_state = context.user_data.get('await')
-    if not await_state:
-        return
-
-    if await_state == 'welcome_image':
-        try:
-            photo = update.message.photo[-1]
-            file = await context.bot.get_file(photo.file_id)
-            await file.download_to_drive(WELCOME_IMAGE_FILE)
-            context.user_data.pop('await', None)
-            await update.message.reply_text("✅ Welcome image set!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="ar_welcome")]]))
-        except Exception as e:
-            await update.message.reply_text(f"❌ Failed: {str(e)[:80]}")
-
-    elif await_state == 'qr_code':
-        try:
-            photo = update.message.photo[-1]
-            file = await context.bot.get_file(photo.file_id)
-            await file.download_to_drive(QR_CODE_FILE)
-            context.user_data.pop('await', None)
-            await update.message.reply_text("✅ QR Code set!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="m_set")]]))
-        except Exception as e:
-            await update.message.reply_text(f"❌ Failed: {str(e)[:80]}")
-
-    elif await_state == 'harden_photo_upload':
-        try:
-            photo = update.message.photo[-1]
-            file = await context.bot.get_file(photo.file_id)
-            await file.download_to_drive(USER_DATA_DIR / 'new_profile_pic.jpg')
-            context.user_data.pop('await', None)
-            await update.message.reply_text("✅ New profile photo saved! Will be applied during next hardening.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="harden_photo")]]))
-        except Exception as e:
-            await update.message.reply_text(f"❌ Failed: {str(e)[:80]}")
-
-    else:
-        await update.message.reply_text("Unexpected photo.")
-
-
-# ====== ERROR HANDLER ======
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Update {update} caused error {context.error}")
+        async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photo uploads for profile pic and welcome image."""
+    await_state = context.user_data.get('await', None)
+    
+    if await_state == 'harden_photo_upload':
+        photo_file = await update.message.photo[-1].get_file()
+        file_path = USER_DATA_DIR / 'new_profile_pic.jpg'
+        await photo_file.download_to_drive(str(file_path))
+        context.user_data['await'] = None
+        await update.message.reply_text(
+            "✅ **New profile photo saved!**\n\n"
+            "📌 It will be applied during **1-click hardening**.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="harden_photo")]])
+        )
+    
+    elif await_state == 'ar_upload_img':
+        photo_file = await update.message.photo[-1].get_file()
+        file_path = USER_DATA_DIR / 'welcome_image.png'
+        await photo_file.download_to_drive(str(file_path))
+        context.user_data['await'] = None
+        await update.message.reply_text(
+            "✅ **Welcome image saved!**\n\n"
+            "📌 It will be sent before auto-reply messages.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]])
+        )
+        async def post_init(application: Application):
+    """Setup after bot initializes."""
+    # Load admin IDs from settings
+    global ADMIN_IDS
+    saved_admins = get_setting('admin_ids', [])
+    if saved_admins and isinstance(saved_admins, list):
+        ADMIN_IDS = saved_admins
+    if OWNER_ID not in ADMIN_IDS:
+        ADMIN_IDS.insert(0, OWNER_ID)
+    
+    # Load customer count
+    global customer_count
+    saved = load_customers()
+    if saved:
+        customer_count = set(saved)
+    
+    # Start background tasks
+    application.create_task(auto_delete_messages_loop())
+    application.create_task(keepalive_loop())
+    application.create_task(account_health_loop())
+    
+    # Set up commands
+    commands = [
+        BotCommand("start", "🏠 Main Menu"),
+        BotCommand("menu", "📋 Show Menu"),
+    ]
     try:
-        if update and update.effective_message:
-            await update.effective_message.reply_text(f"Error: {str(context.error)[:100]}")
+        await application.bot.set_my_commands(commands)
     except:
         pass
+    
+    application.bot_data.start_time = datetime.now()
+    logger.info("Bot initialized successfully!")
 
-
-# ====== MAIN FUNCTION ======
 async def main():
     """Main entry point."""
-    logger.info("Starting bot...")
-
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN not set!")
         return
-
-    app = Application.builder().token(BOT_TOKEN).build()
-
+    
+    if not API_ID or not API_HASH:
+        logger.warning("Using default API_ID/API_HASH. May have rate limits.")
+    
+    # Build application
+    builder = Application.builder()
+    builder.token(BOT_TOKEN)
+    builder.post_init(post_init)
+    builder.connect_timeout(30.0)
+    builder.read_timeout(30.0)
+    builder.write_timeout(30.0)
+    builder.pool_timeout(30.0)
+    
+    app = builder.build()
+    
+    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
-    app.add_error_handler(error_handler)
-
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_text_input))
+    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    
+    # Start polling
+    logger.info("Starting bot polling...")
     await app.initialize()
     await app.start()
-
-    global customer_count
-    customer_count = set(load_json(CUSTOMERS_FILE, []))
-
-    # Load active accounts from disk
-    all_accs = get_all_accounts()
-    for acc in all_accs:
-        if not acc.get('is_backup'):
-            try:
-                nc = await start_account(acc)
-                if nc:
-                    active_accounts.append(acc)
-                    account_clients[acc['id']] = nc
-                    account_stats[acc['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': False, 'spam_running': False}
-                    account_stop_flags[acc['id']] = False
-                    logger.info(f"Loaded account: {acc.get('name')} ({acc.get('phone')})")
-            except Exception as e:
-                logger.error(f"Failed to load account {acc.get('name')}: {e}")
-
-    # Auto setup auto-reply handlers if enabled
-    if auto_reply_enabled:
-        await setup_auto_reply_all()
-
-    # Auto setup auto-delete timer
+    await app.updater.start_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        poll_interval=1.0,
+        timeout=30
+    )
+    
+    logger.info("Bot is running! Press Ctrl+C to stop.")
+    
+    # Keep running
+    stop_signal = asyncio.Future()
+    
     try:
-        logger.info("Setting up auto-delete timer...")
-        ad_data = load_auto_delete_data()
-        if ad_data.get("enabled", False):
-            registered = await setup_auto_delete_fast(ad_data.get("seconds", 86400))
-            logger.info(f"Auto-delete timer setup: {registered} chats registered")
-    except Exception as e:
-        logger.error(f"Auto-delete timer setup failed: {e}")
-
-    # Start background tasks
-    asyncio.create_task(auto_delete_messages_loop(app))
-    asyncio.create_task(keepalive_loop())
-    asyncio.create_task(account_health_loop())
-
-    await app.updater.start_polling(drop_pending_updates=True)
-
-    logger.info(f"Bot started! {len(active_accounts)} accounts loaded.")
-
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        await stop_signal
     except asyncio.CancelledError:
-        logger.info("Tasks cancelled, shutting down...")
+        pass
     finally:
-        logger.info("Stopping bot...")
+        logger.info("Shutting down...")
         await app.updater.stop()
         await app.stop()
         await app.shutdown()
-        for aid, client in list(account_clients.items()):
-            try:
-                await client.disconnect()
-            except:
-                pass
-        logger.info("Bot stopped.")
 
-
-# ====== FLASK WEBHOOK (optional) ======
+# ====== FLASK WEB SERVER (for Render health checks) ======
 if FLASK_AVAILABLE:
     flask_app = Flask(__name__)
     flask_app.secret_key = WEBHOOK_SECRET
-
+    
     @flask_app.route('/')
     def home():
-        return jsonify({"status": "running", "accounts": len(active_accounts), "customers": len(customer_count)})
-
+        return jsonify({
+            "status": "running",
+            "bot": "SecureBot",
+            "version": "1.0",
+            "active_accounts": len(active_accounts),
+            "timestamp": datetime.now().isoformat()
+        })
+    
     @flask_app.route('/health')
     def health():
-        return jsonify({"status": "ok", "timestamp": datetime.now().isoformat()})
-
+        return jsonify({"status": "healthy", "time": datetime.now().isoformat()}), 200
+    
     def run_flask():
-        flask_app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)), debug=False, use_reloader=False)
-
+        port = int(os.environ.get('PORT', 8080))
+        flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+else:
+    def run_flask():
+        pass
 
 # ====== ENTRY POINT ======
-if __name__ == "__main__":
-    logger.info("=" * 50)
-    logger.info("Bot Starting...")
-    logger.info(f"Python: {sys.version}")
-    logger.info(f"PTB Available: {PTB_AVAILABLE}")
-    logger.info(f"Telethon Available: {TELETHON_AVAILABLE}")
-    logger.info(f"Flask Available: {FLASK_AVAILABLE}")
-    logger.info(f"Accounts file: {ACCOUNTS_FILE}")
-    logger.info(f"Auto-delete file: {AUTO_DELETE_FILE}")
-    logger.info("=" * 50)
-
-    # Start Flask in a thread if available (for Render web service)
-    if FLASK_AVAILABLE and os.environ.get('RENDER', ''):
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        logger.info("Flask web server started in background thread")
-
+if __name__ == '__main__':
+    # Start Flask in a separate thread (needed for Render)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # Start the bot
     try:
         asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot stopped by user")
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user.")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         traceback.print_exc()
-        sys.exit(1)
+        
