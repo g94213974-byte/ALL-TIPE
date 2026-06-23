@@ -1238,7 +1238,175 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             sent = await client.send_code_request(text)
             ctx.user_data['phone_code_hash'] = sent.phone_code_hash
             ctx.user_data['_client'] = client
-            await update.message.reply_text("📱 **OTP পাঠানো হয়েছে!
+            await update.message.reply_text("📱 **OTP পাঠানো হয়েছে!** ৬ ডিজিটের কোড লিখুন:", parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ OTP পাঠাতে ব্যর্থ: {str(e)[:100]}")
+            try:
+                await ctx.user_data['_client'].disconnect()
+            except:
+                pass
+
+    elif await_state == 'ac_otp':
+        phone = ctx.user_data.get('phone', '')
+        pch = ctx.user_data.get('phone_code_hash', '')
+        client = ctx.user_data.get('_client')
+        if not client:
+            return await update.message.reply_text("❌ সেশন হারিয়ে গেছে!")
+
+        try:
+            try:
+                await client.sign_in(phone=phone, code=text, phone_code_hash=pch)
+            except SessionPasswordNeededError:
+                ctx.user_data['await'] = 'ac_2fa'
+                return await update.message.reply_text("🔑 **2FA পাসওয়ার্ড প্রয়োজন!** লিখুন:", parse_mode='Markdown')
+
+            me = await client.get_me()
+            session_str = client.session.save()
+
+            acc = {
+                'id': f"ACC_{int(time.time())}_{random.randint(100,999)}",
+                'name': f"{me.first_name or ''} {me.last_name or ''}".strip() or 'User',
+                'phone': phone,
+                'session': session_str,
+                'api_id': API_ID,
+                'api_hash': API_HASH,
+                'user_id': me.id,
+                'is_backup': False,
+                'created_at': datetime.now().isoformat()
+            }
+
+            try:
+                acc['phone'] = me.phone or phone
+            except:
+                pass
+
+            add_account_data(acc)
+
+            if acc not in active_accounts:
+                active_accounts.append(acc)
+            account_clients[acc['id']] = client
+            account_stats.setdefault(acc['id'], {})['healthy'] = True
+
+            if auto_reply_enabled:
+                await setup_auto_reply_for_account(acc['id'], client)
+
+            await update.message.reply_text(
+                f"✅ **অ্যাকাউন্ট যোগ!** 🎉\n\n👤 {acc['name']}\n📱 {acc['phone'][-8:]}\n🟢 সক্রিয়",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 মেনু", callback_data="main")]]))
+            try:
+                await client.disconnect()
+            except:
+                pass
+
+        except Exception as e:
+            await update.message.reply_text(f"❌ লগইন ব্যর্থ: {str(e)[:100]}")
+
+    elif await_state == 'ac_2fa':
+        phone = ctx.user_data.get('phone', '')
+        client = ctx.user_data.get('_client')
+        if not client:
+            return await update.message.reply_text("❌ সেশন হারিয়ে গেছে!")
+
+        try:
+            await client.sign_in(phone=phone, password=text)
+            me = await client.get_me()
+            session_str = client.session.save()
+
+            acc = {
+                'id': f"ACC_{int(time.time())}_{random.randint(100,999)}",
+                'name': f"{me.first_name or ''} {me.last_name or ''}".strip() or 'User',
+                'phone': phone,
+                'session': session_str,
+                'api_id': API_ID,
+                'api_hash': API_HASH,
+                'user_id': me.id,
+                'is_backup': False,
+                'created_at': datetime.now().isoformat()
+            }
+
+            try:
+                acc['phone'] = me.phone or phone
+            except:
+                pass
+
+            add_account_data(acc)
+            if acc not in active_accounts:
+                active_accounts.append(acc)
+            account_clients[acc['id']] = client
+            account_stats.setdefault(acc['id'], {})['healthy'] = True
+
+            await update.message.reply_text(
+                f"✅ **2FA সহ অ্যাকাউন্ট যোগ!** 🎉\n\n👤 {acc['name']}\n🟢 সক্রিয়",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 মেনু", callback_data="main")]]))
+        except Exception as e:
+            await update.message.reply_text(f"❌ 2FA ব্যর্থ: {str(e)[:100]}")
+
+    # ====== SESSION STRING ======
+    elif await_state == 'ac_ss':
+        session_str = text.strip()
+        try:
+            client = TelegramClient(StringSession(session_str), API_ID, API_HASH, proxy=PROXY_CONFIG)
+            await client.connect()
+            me = await client.get_me()
+            if not me:
+                await update.message.reply_text("❌ **অবৈধ সেশন!**")
+                await client.disconnect()
+                return
+
+            acc = {
+                'id': f"ACC_{int(time.time())}_{random.randint(100,999)}",
+                'name': f"{me.first_name or ''} {me.last_name or ''}".strip() or 'User',
+                'phone': getattr(me, 'phone', 'N/A') or 'N/A',
+                'session': session_str,
+                'api_id': API_ID,
+                'api_hash': API_HASH,
+                'user_id': me.id,
+                'is_backup': False,
+                'created_at': datetime.now().isoformat()
+            }
+
+            add_account_data(acc)
+            if acc not in active_accounts:
+                active_accounts.append(acc)
+            account_clients[acc['id']] = client
+            account_stats.setdefault(acc['id'], {})['healthy'] = True
+
+            await update.message.reply_text(f"✅ **সেশন থেকে অ্যাকাউন্ট যোগ!** 👤 {acc['name']} 🟢 সক্রিয়",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 মেনু", callback_data="main")]]))
+        except Exception as e:
+            await update.message.reply_text(f"❌ ব্যর্থ: {str(e)[:100]}")
+
+    # ====== BACKUP SESSION ======
+    elif await_state == 'ac_bk_ss':
+        session_str = text.strip()
+        try:
+            client = TelegramClient(StringSession(session_str), API_ID, API_HASH, proxy=PROXY_CONFIG)
+            await client.connect()
+            me = await client.get_me()
+            if not me:
+                await update.message.reply_text("❌ **অবৈধ ব্যাকআপ সেশন!**")
+                await client.disconnect()
+                return
+
+            acc = {
+                'id': f"BK_{int(time.time())}_{random.randint(100,999)}",
+                'name': f"{me.first_name or ''} {me.last_name or ''}".strip() or 'Backup',
+                'phone': getattr(me, 'phone', 'N/A') or 'N/A',
+                'session': session_str,
+                'api_id': API_ID,
+                'api_hash': API_HASH,
+                'user_id': me.id,
+                'is_backup': True,
+                'created_at': datetime.now().isoformat()
+            }
+
+            add_account_data(acc)
+            await update.message.reply_text(f"✅ **ব্যাকআপ যোগ!** 💾 👤 {acc['name']}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 ব্যাকআপ", callback_data="ac_bk")]]))
+            await client.disconnect()
+        except Exception as e:
+            await update.message.reply_text(f"❌ ব্যর্থ: {str(e)[:100]}")
             # ====== HARDENING SETTINGS ======
     elif await_state == 'harden_name':
         s = jload('settings', {})
