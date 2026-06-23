@@ -6,6 +6,7 @@ All problems solved:
 2. Auto Reply Start/Stop All with Back button
 3. Typing effect added (seen delay → typing → message send)
 4. Start All actually starts auto reply
+5. FIXED: SendTypingAction import error resolved
 """
 
 import os, sys, json, asyncio, random, logging, threading, time
@@ -47,10 +48,10 @@ from telethon.errors import (
     AuthKeyUnregisteredError, UserDeactivatedError,
     PhoneNumberInvalidError
 )
-from telethon.tl.functions.messages import GetDialogsRequest, ReadHistoryRequest, SendTypingAction
-from telethon.tl.functions.contacts import BlockRequest, DeleteContactsRequest
-from telethon.tl.functions.account import UpdateStatusRequest
+from telethon.tl.functions.messages import GetDialogsRequest, ReadHistoryRequest
+from telethon.tl.functions.accounts import UpdateStatusRequest
 from telethon.tl.types import InputPeerEmpty, SendMessageTypingAction
+from telethon.tl.functions.contacts import BlockRequest, DeleteContactsRequest
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import (
@@ -318,11 +319,8 @@ async def send_with_typing(client, chat_id, message_text):
     
     if typing_enabled and typing_duration > 0:
         try:
-            await client(SendTypingAction(
-                peer=await client.get_input_entity(chat_id),
-                action=SendMessageTypingAction()
-            ))
-            await asyncio.sleep(typing_duration)
+            async with client.action(chat_id, 'typing'):
+                await asyncio.sleep(typing_duration)
         except:
             pass
     
@@ -784,7 +782,6 @@ async def spam_account(acc):
                 if account_stop_flags.get(acc_id, False) or not account_spam_active.get(acc_id, True):
                     break
                 try:
-                    # Rotate messages properly
                     message = spam_messages[msg_index % len(spam_messages)]
                     await client.send_message(group, message)
                     account_stats[acc_id]['spam_sent'] += 1
@@ -1266,6 +1263,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             txt += "No custom messages. Using default.\n"
         await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
     
+    elif data == "gs_msg_del":
+        msgs = load_spam_messages()
+        if not msgs:
+            await query.edit_message_text("No messages!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
+            return
+        kb = [[InlineKeyboardButton(f"🗑️ {m['text'][:20]}...", callback_data=f"gsmd_{m['id']}")] for m in msgs[:10]]
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="gs_msg")])
+        await query.edit_message_text("Select to delete:", reply_markup=InlineKeyboardMarkup(kb))
+    
+    elif data.startswith("gsmd_"):
+        mid = int(data.split('_')[1])
+        delete_spam_message(mid)
+        msgs = load_spam_messages()
+        for acc in active_accounts:
+            acc_id = acc['id']
+            account_spam_messages[acc_id] = [m['text'] for m in msgs]
+        await query.edit_message_text("✅ Deleted!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
+    
     elif data == "gs_st":
         txt = "📊 **Performance**\n\n"
         for a in active_accounts:
@@ -1311,39 +1326,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         aid = data.split('_', 1)[1]
         a = find_account(aid)
         name = a.get('name', '?') if a else '?'
-        logger.info(f"Deleting account: {name} ({aid})")
-        
         if aid in account_keepalive_tasks:
             if not account_keepalive_tasks[aid].done():
                 account_keepalive_tasks[aid].cancel()
                 try: await account_keepalive_tasks[aid]
                 except: pass
             del account_keepalive_tasks[aid]
-        
         if aid in account_spam_tasks:
             if not account_spam_tasks[aid].done():
                 account_spam_tasks[aid].cancel()
                 try: await account_spam_tasks[aid]
                 except: pass
             del account_spam_tasks[aid]
-        
         if aid in account_clients:
             try:
                 await account_clients[aid].disconnect()
                 await asyncio.sleep(0.5)
             except: pass
             del account_clients[aid]
-        
         active_accounts[:] = [x for x in active_accounts if x['id'] != aid]
-        
         for d in [account_stats, account_stop_flags, account_spam_tasks, account_keepalive_tasks, account_spam_active]:
             if aid in d: del d[aid]
-        
         remove_account_data(aid)
         remaining = find_account(aid)
         if remaining:
             remove_account_data(aid)
-        
         await query.edit_message_text(f"✅ {name} permanently deleted!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
         return
     
@@ -1501,7 +1508,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['rt'] = 'contains'
         await query.edit_message_text("✅ Match: **contains**\nNow send the reply text:")
         context.user_data['await'] = 'rt'
-        # ============ TEXT HANDLER ============
+
+
+# ============ TEXT HANDLER ============
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
