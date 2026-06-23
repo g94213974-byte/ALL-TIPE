@@ -1366,6 +1366,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del account_spam_active[aid]
         
         # Remove from active_accounts
+        # Remove from active_accounts
         global active_accounts
         active_accounts = [a for a in active_accounts if a['id'] != aid]
         
@@ -1383,7 +1384,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]])
         )
-        elif data == "ac_bk":
+        return   # <-- এই return যোগ করুন
+    
+    elif data == "ac_bk":   # <-- এখন এটি সঠিকভাবে if-elif চেইনের অংশ
         ba = get_backup_accounts()
         txt = f"💾 **Backup Management**\n\nBackup accounts: {len(ba)}\n\n"
         if ba:
