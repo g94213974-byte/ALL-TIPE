@@ -2359,7 +2359,8 @@ async def process_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except ValueError:
             await update.message.reply_text("❌ **Invalid User ID!**", parse_mode='Markdown')
         return
-        async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo uploads for profile pic and welcome image."""
     await_state = context.user_data.get('await', None)
     
