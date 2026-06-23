@@ -49,7 +49,6 @@ from telethon.errors import (
     PhoneNumberInvalidError
 )
 from telethon.tl.functions.messages import GetDialogsRequest, ReadHistoryRequest
-from telethon.tl.functions.accounts import UpdateStatusRequest
 from telethon.tl.types import InputPeerEmpty, SendMessageTypingAction
 from telethon.tl.functions.contacts import BlockRequest, DeleteContactsRequest
 
