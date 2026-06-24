@@ -1,7 +1,5 @@
-telethon==1.35.0
-python-telegram-bot==20.7
-cryptography==41.0.7
-flask==3.0.2
-requests>=2.31.0
-Jinja2>=3.1.2
+telethon==1.36.0
+python-telegram-bot==21.3
+aiohttp==3.9.5
 PySocks==1.7.1
+cryptg==0.4.0
