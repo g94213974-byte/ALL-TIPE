@@ -1338,7 +1338,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
     
-    if if data == "ac_ph":
+    if data == "ac_ph":
         context.user_data['await'] = 'ac_ph'
         await query.edit_message_text("📱 **Phone**" + NL + NL + "`+8801XXXXXXXXX`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
         return
