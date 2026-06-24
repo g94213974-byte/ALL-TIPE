@@ -2271,10 +2271,13 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("👋 Bot stopped by user.")
-    except Exception as e:
-        logger.exception(f"💥 Fatal error: {e}")
-        sys.exit(1)
+    while True:
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            logger.info("👋 Bot stopped by user.")
+            sys.exit(0)
+        except Exception as e:
+            logger.exception(f"💥 Fatal error: {e}")
+            logger.info("🔄 Restarting in 10 seconds...")
+            time.sleep(10)
