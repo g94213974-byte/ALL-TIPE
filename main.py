@@ -2,12 +2,12 @@
 """
 UNIFIED TELEGRAM BOT - COMPLETELY FIXED VERSION
 All issues fixed:
-1. BOT_TOKEN no longer logged
-2. Single auto-reply system (no duplicate handlers)
-3. Proper indentation throughout
-4. Typing effect ON by default
-5. Polling timeout prevented
-6. All menu features working
+- BOT_TOKEN no longer logged
+- Single auto-reply system (no duplicate handlers)
+- Proper indentation throughout  
+- Typing effect ON by default
+- Polling timeout prevented
+- All Python 3.11 f-string backslash issues fixed
 """
 
 import os, sys, json, asyncio, random, logging, time, uuid
@@ -17,7 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 
 # ═══════════════════════════════════════════
-# LOGGING - Token NOT shown in logs
+# LOGGING
 # ═══════════════════════════════════════════
 logging.basicConfig(
     level=logging.INFO,
@@ -125,11 +125,11 @@ DEFAULT_SETTINGS = {
     'flood_slow_mode': True,
     'spam_message': '𝟭𝟬 𝗠𝗜𝗡 𝗩𝗖 ₹𝟰𝟱 𝗕𝗔𝗕𝗬😘',
     'ignored_messages': '',
-    'price_list_text': '🔥 10 MIN VC → ₹99\n🔥 20 MIN VC → ₹119',
+    'price_list_text': '🔥 10 MIN VC -> Rs.99\n🔥 20 MIN VC -> Rs.119',
     'upi_id': '',
     'paytm_num': '',
-    'welcome_message': '🔥 Welcome Baby! 🔥\n\n10 MIN VC → ₹99\n20 MIN VC → ₹119',
-    'welcome_message2': '🛒 How to order?\n\n1️⃣ Pay via UPI/PayTm\n2️⃣ Send screenshot\n3️⃣ Enjoy VC call! 💋',
+    'welcome_message': '🔥 Welcome Baby! 🔥\n\n10 MIN VC -> Rs.99\n20 MIN VC -> Rs.119',
+    'welcome_message2': '🛒 How to order?\n\n1. Pay via UPI/PayTm\n2. Send screenshot\n3. Enjoy VC call! 💋',
     'qr_code_path': '',
     'price_list_image': '',
     'welcome_image': '',
@@ -244,6 +244,8 @@ def save_spam_messages(msgs):
     save_json(SPAM_MSG_FILE, msgs)
 
 
+NL = "\n"  # For f-string usage in Python 3.11
+
 # ═══════════════════════════════════════════
 # TYPING EFFECT (MAX 3 SEC)
 # ═══════════════════════════════════════════
@@ -305,7 +307,7 @@ async def process_auto_reply_fast(event, client, acc, uid):
     # Check ignored messages
     ignored = get_setting('ignored_messages', '')
     if ignored:
-        for line in ignored.split('\n'):
+        for line in ignored.split(NL):
             if line.strip().lower() == msg_lower:
                 customer_count[uid] = prev_count + 1
                 return
@@ -339,7 +341,7 @@ async def process_auto_reply_fast(event, client, acc, uid):
     # Service keywords
     service_keywords = ['service', 'chahiye', 'kharid', 'demo', 'video', 'call', 'vc', 'price', 'rate']
     if any(kw in msg_lower for kw in service_keywords):
-        price_text = get_setting('price_list_text', "🔥 10 MIN VC → ₹99\n🔥 20 MIN VC → ₹119")
+        price_text = get_setting('price_list_text', "🔥 10 MIN VC -> Rs.99\n🔥 20 MIN VC -> Rs.119")
         price_image = get_setting('price_list_image', '')
         if price_image and Path(price_image).exists():
             try:
@@ -349,7 +351,8 @@ async def process_auto_reply_fast(event, client, acc, uid):
         else:
             await send_with_typing(client, chat_id, price_text)
         await asyncio.sleep(0.3)
-        await send_with_typing(client, chat_id, random.choice(["How many minutes? 🔥", "Pay and enjoy! 😘", "Tell me your choice 💋"]))
+        replies = ["How many minutes? 🔥", "Pay and enjoy! 😘", "Tell me your choice 💋"]
+        await send_with_typing(client, chat_id, random.choice(replies))
         customer_count[uid] = prev_count + 1
         return
     
@@ -380,7 +383,7 @@ async def process_auto_reply_fast(event, client, acc, uid):
 
 
 async def send_dual_welcome(client, chat_id):
-    wm1 = get_setting('welcome_message', '🔥 Welcome Baby! 🔥\n\n10 MIN VC → ₹99\n20 MIN VC → ₹119')
+    wm1 = get_setting('welcome_message', '🔥 Welcome Baby! 🔥')
     wi1 = get_setting('welcome_image', '')
     if wi1 and Path(wi1).exists():
         try:
@@ -390,7 +393,7 @@ async def send_dual_welcome(client, chat_id):
     else:
         await send_with_typing(client, chat_id, wm1)
     await asyncio.sleep(1.5)
-    wm2 = get_setting('welcome_message2', '🛒 How to order?\n\n1️⃣ Pay via UPI/PayTm\n2️⃣ Send screenshot\n3️⃣ Enjoy VC call! 💋')
+    wm2 = get_setting('welcome_message2', '🛒 How to order?')
     wi2 = get_setting('welcome_image2', '')
     if wi2 and Path(wi2).exists():
         try:
@@ -404,17 +407,21 @@ async def send_payment_info(client, chat_id, event):
     upi = get_setting('upi_id', '')
     paytm = get_setting('paytm_num', '')
     qr_path = get_setting('qr_code_path', '')
-    payment_msg = "**💰 Payment 💰**\n\n"
-    if upi: payment_msg += f"📱 UPI: {upi}\n"
-    if paytm: payment_msg += f"💳 PayTm: {paytm}\n"
-    payment_msg += f"\n{get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')}"
+    payment_msg = "**💰 Payment 💰**" + NL + NL
+    if upi:
+        payment_msg += "📱 UPI: " + upi + NL
+    if paytm:
+        payment_msg += "💳 PayTm: " + paytm + NL
+    payment_msg += NL + get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')
     if qr_path:
         try:
             if qr_path.startswith('http://') or qr_path.startswith('https://'):
-                payment_msg = f"**💰 Payment 💰**\n\n"
-                if upi: payment_msg += f"📱 UPI: {upi}\n"
-                if paytm: payment_msg += f"💳 PayTm: {paytm}\n"
-                payment_msg += f"\n📷 QR: {qr_path}\n\n{get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')}"
+                payment_msg = "**💰 Payment 💰**" + NL + NL
+                if upi:
+                    payment_msg += "📱 UPI: " + upi + NL
+                if paytm:
+                    payment_msg += "💳 PayTm: " + paytm + NL
+                payment_msg += NL + "📷 QR: " + qr_path + NL + NL + get_setting('payment_keyword_reply', 'Scan & Pay baby 😘🔥')
                 await send_with_typing(client, chat_id, payment_msg)
             elif Path(qr_path).exists():
                 await client.send_file(chat_id, qr_path, caption=payment_msg)
@@ -428,20 +435,31 @@ async def send_payment_info(client, chat_id, event):
 async def block_user_and_delete_photos(event, client, uid):
     try:
         input_chat = await event.get_input_chat()
-        try: await client.delete_messages(input_chat, [event.message.id], revoke=True)
-        except: pass
+        try:
+            await client.delete_messages(input_chat, [event.message.id], revoke=True)
+        except:
+            pass
         try:
             async for msg in client.iter_messages(input_chat, limit=100):
-                try: await client.delete_messages(input_chat, [msg.id], revoke=True)
-                except: pass
-        except: pass
-        try: await client.delete_dialog(input_chat)
-        except: pass
+                try:
+                    await client.delete_messages(input_chat, [msg.id], revoke=True)
+                except:
+                    pass
+        except:
+            pass
+        try:
+            await client.delete_dialog(input_chat)
+        except:
+            pass
         await asyncio.sleep(1)
-        try: await client(BlockRequest(id=uid))
-        except: pass
-        try: await client(DeleteContactsRequest(id=[uid]))
-        except: pass
+        try:
+            await client(BlockRequest(id=uid))
+        except:
+            pass
+        try:
+            await client(DeleteContactsRequest(id=[uid]))
+        except:
+            pass
     except Exception as e:
         logger.error(f"Block failed for {uid}: {e}")
 
@@ -457,9 +475,10 @@ async def handle_payment_screenshot(event, client, uid):
         sender_name = getattr(event.sender, 'first_name', 'Unknown')
         await event.respond("Payment screenshot received! Admin will contact you soon")
         try:
-            await client.send_message(OWNER_ID, f"✅ PAYMENT RECEIVED!\n👤 Name: {sender_name}\n🆔 ID: {uid}")
+            await client.send_message(OWNER_ID, f"✅ PAYMENT RECEIVED!{NL}👤 Name: {sender_name}{NL}🆔 ID: {uid}")
             await client.send_file(OWNER_ID, str(file_path))
-        except: pass
+        except:
+            pass
         customer_count[uid] = -2
     except Exception as e:
         logger.error(f"Payment screenshot handling failed: {e}")
@@ -551,7 +570,7 @@ async def start_account(acc):
         return None
 
 async def keep_alive_loop(acc_id, client, interval=60):
-    """Keep account session alive - lightweight"""
+    """Keep account session alive"""
     acc = None
     for a in active_accounts:
         if a['id'] == acc_id:
@@ -591,10 +610,14 @@ async def send_logout_notification(acc, reason="Unknown"):
         return
     try:
         bot = Bot(token=BOT_TOKEN)
-        await bot.send_message(
-            chat_id=OWNER_ID,
-            text=f"⚠️ **ACCOUNT LOGOUT!** ⚠️\n👤 {acc.get('name','?')}\n📱 {acc.get('phone','N/A')}\n❌ {reason}\n🔄 Replacing with backup..."
-        )
+        msg_parts = [
+            "⚠️ **ACCOUNT LOGOUT!** ⚠️",
+            f"👤 {acc.get('name','?')}",
+            f"📱 {acc.get('phone','N/A')}",
+            f"❌ {reason}",
+            "🔄 Replacing with backup..."
+        ]
+        await bot.send_message(chat_id=OWNER_ID, text=NL.join(msg_parts))
     except:
         pass
 
@@ -603,43 +626,46 @@ async def handle_banned(acc):
     name = acc.get('name', 'Unknown')
     logger.warning(f"Ban processing: {name}")
     
-    # Save to banned list
     banned = load_json(BANNED_FILE, [])
     if not any(b['id'] == acc_id for b in banned):
         banned.append({'id': acc_id, 'name': name, 'phone': acc.get('phone', 'N/A'), 'banned_at': datetime.now().isoformat()})
         save_json(BANNED_FILE, banned)
     
-    # Cleanup tasks
     if acc_id in account_keepalive_tasks:
         if not account_keepalive_tasks[acc_id].done():
             account_keepalive_tasks[acc_id].cancel()
-            try: await account_keepalive_tasks[acc_id]
-            except: pass
+            try:
+                await account_keepalive_tasks[acc_id]
+            except:
+                pass
         del account_keepalive_tasks[acc_id]
     
     if acc_id in account_spam_tasks:
         if not account_spam_tasks[acc_id].done():
             account_spam_tasks[acc_id].cancel()
-            try: await account_spam_tasks[acc_id]
-            except: pass
+            try:
+                await account_spam_tasks[acc_id]
+            except:
+                pass
         del account_spam_tasks[acc_id]
     
     if acc_id in account_clients:
-        try: await account_clients[acc_id].disconnect()
-        except: pass
+        try:
+            await account_clients[acc_id].disconnect()
+        except:
+            pass
         del account_clients[acc_id]
     
     active_accounts[:] = [a for a in active_accounts if a['id'] != acc_id]
     account_stop_flags[acc_id] = True
     for d in [account_spam_active, account_stats]:
-        if acc_id in d: del d[acc_id]
+        if acc_id in d:
+            del d[acc_id]
     
-    # Remove from saved data
     data = load_accounts()
     data['accounts'] = [a for a in data.get('accounts', []) if a['id'] != acc_id]
     save_accounts(data)
     
-    # Try backup
     all_accounts_data = data.get('accounts', [])
     backups = [a for a in all_accounts_data if a.get('is_backup', False)]
     if backups:
@@ -676,7 +702,8 @@ async def get_user_groups(client):
                                (not hasattr(entity, 'broadcast') and not hasattr(entity, 'megagroup'))
                     if is_group:
                         groups.append(entity)
-            except: pass
+            except:
+                pass
         return groups
     except Exception as e:
         logger.error(f"Failed to get groups: {e}")
@@ -777,11 +804,13 @@ async def spam_account(acc):
                     await client.start()
                     groups = await get_user_groups(client)
                     max_b = min(cfg['batch'], len(groups))
-                except: pass
+                except:
+                    pass
             
             if cfg['cycle'] > 0:
                 for _ in range(cfg['cycle']):
-                    if account_stop_flags.get(acc_id, False): break
+                    if account_stop_flags.get(acc_id, False):
+                        break
                     await asyncio.sleep(1)
     
     except asyncio.CancelledError:
@@ -795,8 +824,10 @@ async def spam_account(acc):
     finally:
         account_stats[acc_id]['spam_running'] = False
         account_spam_active[acc_id] = False
-        try: await client.disconnect()
-        except: pass
+        try:
+            await client.disconnect()
+        except:
+            pass
 
 def stop_spam(acc_id=None):
     if acc_id:
@@ -839,7 +870,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Unauthorized!")
         return
     await update.message.reply_text(
-        "🤖 **HACKER AI CONTROL PANEL** 🤖\n\nSelect:",
+        "🤖 **HACKER AI CONTROL PANEL** 🤖" + NL + NL + "Select:",
         reply_markup=main_keyboard()
     )
 
@@ -862,7 +893,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ─── Main Menu ───
     if data == "main":
         await query.edit_message_text(
-            "🤖 **HACKER AI CONTROL PANEL** 🤖\n\nSelect:",
+            "🤖 **HACKER AI CONTROL PANEL** 🤖" + NL + NL + "Select:",
             reply_markup=main_keyboard()
         )
         return
@@ -874,7 +905,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sd = int(get_setting('seen_delay', 1))
         td = int(get_setting('typing_duration', 2))
         te = "🟢 ON" if get_setting('typing_enabled', True) else "🔴 OFF"
-        txt = f"📨 **AR** | {status}\n👁️ Seen: {sd}s\n⌨️ Type: {te} ({td}s)\n🟢 {rc}/{len(active_accounts)}"
+        txt = f"📨 **AR** | {status}" + NL + f"👁️ Seen: {sd}s" + NL + f"⌨️ Type: {te} ({td}s)" + NL + f"🟢 {rc}/{len(active_accounts)}"
         kb = [
             [InlineKeyboardButton(f"{'🔴' if auto_reply_enabled else '🟢'} Toggle", callback_data="ar_t")],
             [InlineKeyboardButton("▶️ Start All", callback_data="ar_start"), InlineKeyboardButton("⏹️ Stop All", callback_data="ar_stop")],
@@ -890,21 +921,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "ar_t":
         auto_reply_enabled = not auto_reply_enabled
-        await query.edit_message_text(f"✅ AR {'ON' if auto_reply_enabled else 'OFF'}!")
+        status = "ON" if auto_reply_enabled else "OFF"
+        await query.edit_message_text(f"✅ AR {status}!")
         await asyncio.sleep(0.5)
-        data = "m_ar"
-        # Re-trigger
-        update.callback_query.data = data
+        update.callback_query.data = "m_ar"
         await handle_callback(update, context)
         return
     
     if data == "ar_te":
         cur = get_setting('typing_enabled', True)
         set_setting('typing_enabled', not cur)
-        await query.edit_message_text(f"✅ Typing {'ON' if not cur else 'OFF'}!")
+        status = "ON" if not cur else "OFF"
+        await query.edit_message_text(f"✅ Typing {status}!")
         await asyncio.sleep(0.5)
-        data = "m_ar"
-        update.callback_query.data = data
+        update.callback_query.data = "m_ar"
         await handle_callback(update, context)
         return
     
@@ -923,18 +953,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "ar_sd":
         context.user_data['await'] = 'seen_delay'
-        await query.edit_message_text(f"👁️ Seen Delay\nCurrent: {get_setting('seen_delay',1)}s\nEnter (1-5):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+        txt = f"👁️ Seen Delay{NL}Current: {get_setting('seen_delay',1)}s{NL}Enter (1-5):"
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
         return
     
     if data == "ar_td":
         context.user_data['await'] = 'typing_duration'
-        await query.edit_message_text(f"⌨️ Typing Duration\nCurrent: {get_setting('typing_duration',2)}s\nEnter (1-5):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
+        txt = f"⌨️ Typing Duration{NL}Current: {get_setting('typing_duration',2)}s{NL}Enter (1-5):"
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
         return
     
     if data == "ar_ig":
         context.user_data['await'] = 'ignore'
         cur = get_setting('ignored_messages', '')
-        txt = f"🚫 **Ignored**\nOne per line:\n{('Current:\n'+cur+'\n') if cur else ''}\nEx:\nthanks\nbye"
+        txt = "🚫 **Ignored**" + NL + "One per line:" + NL
+        if cur:
+            txt += "Current:" + NL + cur + NL
+        txt += "Ex:" + NL + "thanks" + NL + "bye"
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_ar")]]))
         return
     
@@ -946,14 +981,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start = pg * pp
         end = start + pp
         pr = replies[start:end]
-        txt = f"💬 **Replies** (P{pg+1}/{tp})\n\n"
+        txt = f"💬 **Replies** (P{pg+1}/{tp})" + NL + NL
         for r in pr:
-            txt += f"#{r['id']} `{r['keyword'][:15]}`\n➜ {r['reply'][:30]}...\n\n"
+            txt += f"#{r['id']} `{r['keyword'][:15]}`" + NL + f"➜ {r['reply'][:30]}..." + NL + NL
         kb = []
         nav = []
-        if pg > 0: nav.append(InlineKeyboardButton("◀️", callback_data=f"rp_{pg-1}"))
-        if pg < tp-1: nav.append(InlineKeyboardButton("▶️", callback_data=f"rp_{pg+1}"))
-        if nav: kb.append(nav)
+        if pg > 0:
+            nav.append(InlineKeyboardButton("◀️", callback_data=f"rp_{pg-1}"))
+        if pg < tp-1:
+            nav.append(InlineKeyboardButton("▶️", callback_data=f"rp_{pg+1}"))
+        if nav:
+            kb.append(nav)
         kb.append([InlineKeyboardButton("➕ Add", callback_data="ar_a1")])
         kb.append([InlineKeyboardButton("🗑️ Delete", callback_data="ar_dl")])
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_ar")])
@@ -968,7 +1006,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "ar_a1":
         context.user_data['await'] = 'rk'
-        await query.edit_message_text("💬 **Add Reply**\n\nEnter keyword:\nEx: price", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_rp")]]))
+        await query.edit_message_text("💬 **Add Reply**" + NL + NL + "Enter keyword:" + NL + "Ex: price", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_rp")]]))
         return
     
     if data == "ar_dl":
@@ -984,7 +1022,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("ard_"):
         rid = int(data.split('_')[1])
         ok = delete_reply(rid)
-        await query.edit_message_text("✅ Deleted!" if ok else "❌ Not found!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_rp")]]))
+        txt = "✅ Deleted!" if ok else "❌ Not found!"
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ar_rp")]]))
         return
     
     # ─── Group Spam Menu ───
@@ -993,7 +1032,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         st = "🟢 ON" if group_spam_enabled else "🔴 OFF"
         spd = get_setting('spam_speed', 'medium')
         sent = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
-        txt = f"📯 **GS** | {st}\n🏃 {run}/{len(active_accounts)}\n📤 {sent}\n⚡ {spd}"
+        txt = f"📯 **GS** | {st}" + NL + f"🏃 {run}/{len(active_accounts)}" + NL + f"📤 {sent}" + NL + f"⚡ {spd}"
         kb = [
             [InlineKeyboardButton(f"{'🔴' if group_spam_enabled else '🟢'} Toggle", callback_data="gs_t")],
             [InlineKeyboardButton("▶️ Start", callback_data="gs_on"), InlineKeyboardButton("⏹️ Stop", callback_data="gs_off")],
@@ -1008,10 +1047,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "gs_t":
         group_spam_enabled = not group_spam_enabled
-        await query.edit_message_text(f"✅ GS {'ON' if group_spam_enabled else 'OFF'}!")
+        status = "ON" if group_spam_enabled else "OFF"
+        await query.edit_message_text(f"✅ GS {status}!")
         await asyncio.sleep(0.5)
-        data = "m_gs"
-        update.callback_query.data = data
+        update.callback_query.data = "m_gs"
         await handle_callback(update, context)
         return
     
@@ -1029,7 +1068,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not active_accounts:
             await query.edit_message_text("❌ No accounts!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
             return
-        kb = [[InlineKeyboardButton(f"{'🟢' if account_stats.get(a['id'],{}).get('spam_running',False) else '🔴'} {a.get('name','?')[:15]}", callback_data=f"gsa_{a['id']}")] for a in active_accounts]
+        kb = []
+        for a in active_accounts:
+            st = "🟢" if account_stats.get(a['id'], {}).get('spam_running', False) else "🔴"
+            kb.append([InlineKeyboardButton(f"{st} {a.get('name','?')[:15]}", callback_data=f"gsa_{a['id']}")])
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_gs")])
         await query.edit_message_text("👤 **Toggle:**", reply_markup=InlineKeyboardMarkup(kb))
         return
@@ -1040,8 +1082,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stop_spam(aid)
         else:
             start_spam(aid)
-        data = "gs_sp"
-        update.callback_query.data = data
+        update.callback_query.data = "gs_sp"
         await handle_callback(update, context)
         return
     
@@ -1055,7 +1096,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(f"{'✅ ' if cur=='custom' else ''}⚙️ Custom", callback_data="gs_cs")],
             [InlineKeyboardButton("🔙 Back", callback_data="m_gs")]
         ]
-        await query.edit_message_text(f"⚡ **Speed:** {cur}", reply_markup=InlineKeyboardMarkup(kb))
+        txt = f"⚡ **Speed:** {cur}"
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
         return
     
     spd_map = {'gs_sf':'super_fast','gs_fa':'fast','gs_me':'medium','gs_sl':'slow','gs_cs':'custom'}
@@ -1075,27 +1117,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "gs_bs":
         context.user_data['await'] = 'gs_bs'
-        await query.edit_message_text(f"📦 Batch Size\nCurrent: {get_setting('spam_batch_size',6)}\nEnter (1-50):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
+        txt = f"📦 Batch Size{NL}Current: {get_setting('spam_batch_size',6)}{NL}Enter (1-50):"
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
         return
     
     if data == "gs_bd":
         context.user_data['await'] = 'gs_bd'
-        await query.edit_message_text(f"⏱️ Batch Delay\nCurrent: {get_setting('spam_batch_delay',3)}s\nEnter (0-30):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
+        txt = f"⏱️ Batch Delay{NL}Current: {get_setting('spam_batch_delay',3)}s{NL}Enter (0-30):"
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
         return
     
     if data == "gs_cw":
         context.user_data['await'] = 'gs_cw'
-        await query.edit_message_text(f"🔄 Cycle Wait\nCurrent: {get_setting('spam_cycle_wait',30)}s\nEnter (0-300):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
+        txt = f"🔄 Cycle Wait{NL}Current: {get_setting('spam_cycle_wait',30)}s{NL}Enter (0-300):"
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_spd")]]))
         return
     
     if data == "gs_msg":
         msgs = load_spam_messages()
-        txt = "💬 **Spam Messages**\n\n"
+        txt = "💬 **Spam Messages**" + NL + NL
         if msgs:
             for m in msgs:
-                txt += f"📝 {m['text'][:40]}...\n"
+                txt += f"📝 {m['text'][:40]}..." + NL
         else:
-            txt += f"📝 Default: {get_setting('spam_message','...')}\n"
+            txt += f"📝 Default: {get_setting('spam_message','...')}" + NL
         kb = [
             [InlineKeyboardButton("➕ Add", callback_data="gs_msg_add")],
             [InlineKeyboardButton("🗑️ Delete", callback_data="gs_msg_del")],
@@ -1112,7 +1157,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "gs_msg_list":
         msgs = load_spam_messages()
-        txt = "📋 **All Messages**\n\n" + ('\n'.join(f"{i}. {m['text']}" for i,m in enumerate(msgs,1)) if msgs else "None") + "\n"
+        txt = "📋 **All Messages**" + NL + NL
+        if msgs:
+            for i, m in enumerate(msgs, 1):
+                txt += f"{i}. {m['text']}" + NL
+        else:
+            txt += "None" + NL
         await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="gs_msg")]]))
         return
     
@@ -1137,21 +1187,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if data == "gs_st":
-        txt = "📊 **Perf**\n\n"
+        txt = "📊 **Perf**" + NL + NL
         for a in active_accounts:
-            s = account_stats.get(a['id'],{}).get('spam_sent',0)
-            r = "🟢" if account_stats.get(a['id'],{}).get('spam_running',False) else "🔴"
-            txt += f"{r} {a.get('name','?')}: {s}\n"
+            s = account_stats.get(a['id'], {}).get('spam_sent', 0)
+            r = "🟢" if account_stats.get(a['id'], {}).get('spam_running', False) else "🔴"
+            txt += f"{r} {a.get('name','?')}: {s}" + NL
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_gs")]]))
         return
     
     # ─── Accounts Menu ───
     if data == "m_acc":
         da = load_accounts()
-        al = da.get('accounts',[])
+        al = da.get('accounts', [])
         ma = len([x for x in al if not x.get('is_backup')])
         ba = len([x for x in al if x.get('is_backup')])
-        txt = f"👤 **Accounts**\n📌 Main: {ma} | 💾 Backup: {ba} | 🟢 Active: {len(active_accounts)}"
+        txt = f"👤 **Accounts**" + NL + f"📌 Main: {ma} | 💾 Backup: {ba} | 🟢 Active: {len(active_accounts)}"
         kb = [
             [InlineKeyboardButton("📱 Phone+OTP", callback_data="ac_ph")],
             [InlineKeyboardButton("🔑 Session String", callback_data="ac_ss")],
@@ -1165,7 +1215,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "ac_ph":
         context.user_data['await'] = 'ac_ph'
-        await query.edit_message_text("📱 **Phone**\n\n`+8801XXXXXXXXX`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+        await query.edit_message_text("📱 **Phone**" + NL + NL + "`+8801XXXXXXXXX`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
         return
     
     if data == "ac_ss":
@@ -1175,7 +1225,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "ac_del":
         da = load_accounts()
-        al = da.get('accounts',[])
+        al = da.get('accounts', [])
         if not al:
             await query.edit_message_text("❌ None!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
             return
@@ -1185,39 +1235,45 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if data.startswith("acd_"):
-        aid = data.split('_',1)[1]
-        # Cleanup
+        aid = data.split('_', 1)[1]
         if aid in account_keepalive_tasks:
             if not account_keepalive_tasks[aid].done():
                 account_keepalive_tasks[aid].cancel()
-                try: await account_keepalive_tasks[aid]
-                except: pass
+                try:
+                    await account_keepalive_tasks[aid]
+                except:
+                    pass
             del account_keepalive_tasks[aid]
         if aid in account_spam_tasks:
             if not account_spam_tasks[aid].done():
                 account_spam_tasks[aid].cancel()
-                try: await account_spam_tasks[aid]
-                except: pass
+                try:
+                    await account_spam_tasks[aid]
+                except:
+                    pass
             del account_spam_tasks[aid]
         if aid in account_clients:
-            try: await account_clients[aid].disconnect()
-            except: pass
+            try:
+                await account_clients[aid].disconnect()
+            except:
+                pass
             del account_clients[aid]
         active_accounts[:] = [x for x in active_accounts if x['id'] != aid]
         for d in [account_stats, account_stop_flags, account_spam_active]:
-            if aid in d: del d[aid]
+            if aid in d:
+                del d[aid]
         da = load_accounts()
-        da['accounts'] = [a for a in da.get('accounts',[]) if a['id'] != aid]
+        da['accounts'] = [a for a in da.get('accounts', []) if a['id'] != aid]
         save_accounts(da)
         await query.edit_message_text("✅ **Deleted!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
         return
     
     if data == "ac_bk":
         da = load_accounts()
-        ba = [a for a in da.get('accounts',[]) if a.get('is_backup')]
-        txt = f"💾 **Backups** ({len(ba)})\n\n"
-        for i,a in enumerate(ba,1):
-            txt += f"{i}. {a.get('name','?')} ({a.get('phone','N/A')})\n"
+        ba = [a for a in da.get('accounts', []) if a.get('is_backup')]
+        txt = f"💾 **Backups** ({len(ba)})" + NL + NL
+        for i, a in enumerate(ba, 1):
+            txt += f"{i}. {a.get('name','?')} ({a.get('phone','N/A')})" + NL
         kb = [
             [InlineKeyboardButton("➕ Add", callback_data="ac_bk_add")],
             [InlineKeyboardButton("🗑️ Remove", callback_data="ac_bk_del")],
@@ -1233,7 +1289,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "ac_bk_del":
         da = load_accounts()
-        ba = [a for a in da.get('accounts',[]) if a.get('is_backup')]
+        ba = [a for a in da.get('accounts', []) if a.get('is_backup')]
         if not ba:
             await query.edit_message_text("❌ None!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
             return
@@ -1245,22 +1301,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("acbkd_"):
         bid = data.split('_')[1]
         da = load_accounts()
-        da['accounts'] = [a for a in da.get('accounts',[]) if a['id'] != bid]
+        da['accounts'] = [a for a in da.get('accounts', []) if a['id'] != bid]
         save_accounts(da)
         await query.edit_message_text("✅ Removed!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
         return
     
     if data == "ac_ls":
         da = load_accounts()
-        al = da.get('accounts',[])
+        al = da.get('accounts', [])
         if not al:
             await query.edit_message_text("❌ None!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
             return
-        txt = f"📋 **All ({len(al)})**\n\n"
-        for i,a in enumerate(al,1):
+        txt = f"📋 **All ({len(al)})**" + NL + NL
+        for a in al:
             tp = "📌M" if not a.get('is_backup') else "💾B"
-            st = "🟢" if any(x['id']==a['id'] for x in active_accounts) else "🔴"
-            txt += f"{tp}{st} {a.get('name','?')[:12]} 📱{a.get('phone','?')}\n"
+            st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
+            txt += f"{tp}{st} {a.get('name','?')[:12]} 📱{a.get('phone','?')}" + NL
         await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
         return
     
@@ -1283,8 +1339,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data == "st_bp":
         set_setting('block_photo_enabled', not get_setting('block_photo_enabled', True))
-        data = "m_set"
-        update.callback_query.data = data
+        update.callback_query.data = "m_set"
         await handle_callback(update, context)
         return
     
@@ -1295,22 +1350,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['await'] = 'dr_txt'
             await query.edit_message_text("💬 **Enter default reply text:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
         else:
-            data = "m_set"
-            update.callback_query.data = data
+            update.callback_query.data = "m_set"
             await handle_callback(update, context)
         return
     
     if data == "st_fs":
         set_setting('flood_slow_mode', not get_setting('flood_slow_mode', True))
-        data = "m_set"
-        update.callback_query.data = data
+        update.callback_query.data = "m_set"
         await handle_callback(update, context)
         return
     
     if data == "st_ln":
         logout_notification_enabled = not logout_notification_enabled
-        data = "m_set"
-        update.callback_query.data = data
+        update.callback_query.data = "m_set"
         await handle_callback(update, context)
         return
     
@@ -1320,11 +1372,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         wi = "✅" if get_setting('welcome_image','') else "❌"
         wi2 = "✅" if get_setting('welcome_image2','') else "❌"
         pi = "✅" if get_setting('price_list_image','') else "❌"
-        pt = get_setting('price_list_text', "🔥 10MIN ₹99")
+        pt = get_setting('price_list_text', "🔥 10MIN Rs.99")
         qr = "✅" if get_setting('qr_code_path','') else "❌"
         upi = get_setting('upi_id','') or "Not Set"
         paytm = get_setting('paytm_num','') or "Not Set"
-        txt = f"📝 **W&P**\n1️⃣ `{wm[:30]}...` 🖼{wi}\n2️⃣ `{wm2[:30]}...` 🖼{wi2}\n💰 `{pt[:30]}...` 🖼{pi}\n💳 UPI:`{upi}` PayTm:`{paytm}`\n📷QR:{qr}"
+        txt_parts = [
+            "📝 **W&P**",
+            f"1️⃣ `{wm[:30]}...` 🖼{wi}",
+            f"2️⃣ `{wm2[:30]}...` 🖼{wi2}",
+            f"💰 `{pt[:30]}...` 🖼{pi}",
+            f"💳 UPI:`{upi}` PayTm:`{paytm}`",
+            f"📷QR:{qr}"
+        ]
+        txt = NL.join(txt_parts)
         kb = [
             [InlineKeyboardButton("1️⃣ 1st Welcome", callback_data="st_wm"), InlineKeyboardButton("🖼 Pic1", callback_data="st_wi")],
             [InlineKeyboardButton("2️⃣ 2nd Welcome", callback_data="st_wm2"), InlineKeyboardButton("🖼 Pic2", callback_data="st_wi2")],
@@ -1336,58 +1396,120 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
     
-    for opt in ["st_wm","st_wm2","st_pt"]:
-        if data == opt:
-            context.user_data['await'] = data
-            cur = get_setting({'st_wm':'welcome_message','st_wm2':'welcome_message2','st_pt':'price_list_text'}[data],'')
-            txt = f"Send text:\nCurrent: `{cur[:30]}...`\n`remove` to clear" if cur else "Send text:\n`remove` to clear"
-            await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-            return
+    # ─── Settings text inputs ───
+    st_text_map = {
+        'st_wm': ('welcome_message', "👋 **1st Welcome Message**"),
+        'st_wm2': ('welcome_message2', "2️⃣ **2nd Welcome Message**"),
+        'st_pt': ('price_list_text', "💰 **Set Price List Text**"),
+    }
+    if data in st_text_map:
+        key, label = st_text_map[data]
+        context.user_data['await'] = data
+        cur = get_setting(key, '')
+        txt_parts = [label, ""]
+        if cur:
+            txt_parts.append(f"Current: `{cur[:30]}...`")
+        txt_parts.append("`remove` to clear")
+        txt = NL.join(txt_parts)
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        return
     
-    for opt in ["st_wi","st_wi2","st_pi","st_qr"]:
-        if data == opt:
-            context.user_data['await'] = data
-            cur = get_setting({'st_wi':'welcome_image','st_wi2':'welcome_image2','st_pi':'price_list_image','st_qr':'qr_code_path'}[data],'')
-            txt = f"Send photo/URL/path:\nCurrent: `{cur if cur else 'None'}`\n`remove` to clear" 
-            await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-            return
+    st_media_map = {
+        'st_wi': 'welcome_image',
+        'st_wi2': 'welcome_image2',
+        'st_pi': 'price_list_image',
+        'st_qr': 'qr_code_path',
+    }
+    if data in st_media_map:
+        key = st_media_map[data]
+        context.user_data['await'] = data
+        cur = get_setting(key, '')
+        txt_parts = ["🖼️ Send photo/URL/path:", ""]
+        txt_parts.append(f"Current: `{cur if cur else 'None'}`")
+        txt_parts.append("`remove` to clear")
+        txt = NL.join(txt_parts)
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        return
     
-    for opt in ["st_upi","st_paytm"]:
-        if data == opt:
-            context.user_data['await'] = data
-            key = {'st_upi':'upi_id','st_paytm':'paytm_num'}[data]
-            cur = get_setting(key,'')
-            txt = f"Send:\nCurrent: `{cur if cur else 'Not Set'}`\n`remove` to clear"
-            await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
-            return
-    
-    # ─── Status ───
+    st_pay_map = {
+        'st_upi': 'upi_id',
+        'st_paytm': 'paytm_num',
+    }
+    if data in st_pay_map:
+        key = st_pay_map[data]
+        context.user_data['await'] = data
+        cur = get_setting(key, '')
+        txt_parts = ["Send:", ""]
+        txt_parts.append(f"Current: `{cur if cur else 'Not Set'}`")
+        txt_parts.append("`remove` to clear")
+        txt = NL.join(txt_parts)
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        return
+        # ─── Status ───
     if data == "m_stat":
         ar = "🟢" if auto_reply_enabled else "🔴"
         gs = "🟢" if group_spam_enabled else "🔴"
         ln = "🟢" if logout_notification_enabled else "🔴"
-        tc = len([k for k,v in customer_count.items() if v>0])
-        txt = f"📊**STATUS**\n📨AR:{ar} 📯GS:{gs} 🔔LN:{ln}\n👤Total:{len(load_accounts().get('accounts',[]))}\n🟢Active:{len(active_accounts)}\n🏃Spam:{sum(1 for a in active_accounts if account_stats.get(a['id'],{}).get('spam_running',False))}\n📤Sent:{sum(account_stats.get(a['id'],{}).get('spam_sent',0) for a in active_accounts)}\n👥Cust:{tc}\n⚡Speed:{get_setting('spam_speed','medium')}"
-        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="m_stat")],[InlineKeyboardButton("🏠 Menu", callback_data="main")]]))
+        tc = len([k for k, v in customer_count.items() if v > 0])
+        total_accs = len(load_accounts().get('accounts', []))
+        spam_running = sum(1 for a in active_accounts if account_stats.get(a['id'], {}).get('spam_running', False))
+        spam_sent = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
+        speed = get_setting('spam_speed', 'medium')
+        
+        txt_parts = [
+            "📊 **STATUS**",
+            f"📨AR:{ar} 📯GS:{gs} 🔔LN:{ln}",
+            f"👤Total:{total_accs}",
+            f"🟢Active:{len(active_accounts)}",
+            f"🏃Spam:{spam_running}",
+            f"📤Sent:{spam_sent}",
+            f"👥Cust:{tc}",
+            f"⚡Speed:{speed}"
+        ]
+        txt = NL.join(txt_parts)
+        await query.edit_message_text(
+            txt, parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Refresh", callback_data="m_stat")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="main")]
+            ])
+        )
         return
     
     # ─── Admin ───
     if data == "m_adm":
-        txt = f"🔐**Admin**\n👑{OWNER_ID}\n👥{len(admins)-1}\n"
-        for a in admins: txt += f"{'👑' if a==OWNER_ID else '👤'}`{a}`\n"
-        kb = [[InlineKeyboardButton("➕ Add", callback_data="ad_add")],[InlineKeyboardButton("🗑️ Del", callback_data="ad_del")],[InlineKeyboardButton("🏠 Menu", callback_data="main")]]
-        if uid != OWNER_ID: kb = [[InlineKeyboardButton("🏠 Menu", callback_data="main")]]
+        txt_parts = ["🔐 **Admin**", f"👑{OWNER_ID}", f"👥{len(admins)-1}", ""]
+        for a in admins:
+            icon = "👑" if a == OWNER_ID else "👤"
+            txt_parts.append(f"{icon}`{a}`")
+        txt = NL.join(txt_parts)
+        
+        if uid == OWNER_ID:
+            kb = [
+                [InlineKeyboardButton("➕ Add", callback_data="ad_add")],
+                [InlineKeyboardButton("🗑️ Del", callback_data="ad_del")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="main")]
+            ]
+        else:
+            kb = [[InlineKeyboardButton("🏠 Menu", callback_data="main")]]
+        
         await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
     
     if data == "ad_add" and uid == OWNER_ID:
         context.user_data['await'] = 'ad_add'
-        await query.edit_message_text("👤 **Enter user ID:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+        await query.edit_message_text(
+            "👤 **Enter user ID:**",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]])
+        )
         return
     
     if data == "ad_del" and uid == OWNER_ID:
         if len(admins) <= 1:
-            await query.edit_message_text("❌ Only owner!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+            await query.edit_message_text(
+                "❌ Only owner!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]])
+            )
             return
         kb = [[InlineKeyboardButton(f"🗑️ `{a}`", callback_data=f"addc_{a}")] for a in admins if a != OWNER_ID]
         kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_adm")])
@@ -1398,7 +1520,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         aid = int(data.split('_')[1])
         if aid in admins and aid != OWNER_ID:
             admins.remove(aid)
-            await query.edit_message_text(f"✅ Removed!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]]))
+            await query.edit_message_text(
+                "✅ Removed!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]])
+            )
 
 
 # ═══════════════════════════════════════════
@@ -1422,6 +1547,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid not in admins and uid != OWNER_ID:
         return
 
+
 async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     uid = update.effective_user.id
     msg = update.message
@@ -1432,7 +1558,8 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
             v = max(1, min(50, int(text)))
             set_setting('spam_batch_size', v)
             await msg.reply_text(f"✅ Batch: {v}")
-        except: await msg.reply_text("❌ Invalid")
+        except:
+            await msg.reply_text("❌ Invalid")
         del context.user_data['await']
         return
     
@@ -1441,7 +1568,8 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
             v = max(0, min(30, int(text)))
             set_setting('spam_batch_delay', v)
             await msg.reply_text(f"✅ Delay: {v}s")
-        except: await msg.reply_text("❌ Invalid")
+        except:
+            await msg.reply_text("❌ Invalid")
         del context.user_data['await']
         return
     
@@ -1450,7 +1578,8 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
             v = max(0, min(300, int(text)))
             set_setting('spam_cycle_wait', v)
             await msg.reply_text(f"✅ Cycle: {v}s")
-        except: await msg.reply_text("❌ Invalid")
+        except:
+            await msg.reply_text("❌ Invalid")
         del context.user_data['await']
         return
     
@@ -1461,7 +1590,7 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
         save_spam_messages(msgs)
         for a in active_accounts:
             account_spam_messages[a['id']] = [m['text'] for m in msgs]
-        await msg.reply_text(f"✅ Added!")
+        await msg.reply_text("✅ Added!")
         del context.user_data['await']
         return
     
@@ -1471,8 +1600,10 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
             if new_id not in admins:
                 admins.append(new_id)
                 await msg.reply_text(f"✅ Admin: `{new_id}`")
-            else: await msg.reply_text("⚠️ Already admin!")
-        except: await msg.reply_text("❌ Invalid ID!")
+            else:
+                await msg.reply_text("⚠️ Already admin!")
+        except:
+            await msg.reply_text("❌ Invalid ID!")
         del context.user_data['await']
         return
     
@@ -1482,30 +1613,43 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
         del context.user_data['await']
         return
     
-    if await_state in ['st_wm','st_wm2','st_pt','st_upi','st_paytm']:
-        key = {'st_wm':'welcome_message','st_wm2':'welcome_message2','st_pt':'price_list_text','st_upi':'upi_id','st_paytm':'paytm_num'}[await_state]
+    if await_state in ['st_wm', 'st_wm2', 'st_pt', 'st_upi', 'st_paytm']:
+        key = {
+            'st_wm': 'welcome_message',
+            'st_wm2': 'welcome_message2',
+            'st_pt': 'price_list_text',
+            'st_upi': 'upi_id',
+            'st_paytm': 'paytm_num'
+        }[await_state]
+        
         if text.lower() == 'remove':
             set_setting(key, '')
             await msg.reply_text("✅ Cleared!")
         else:
             set_setting(key, text)
-            await msg.reply_text(f"✅ Set!")
+            await msg.reply_text("✅ Set!")
         del context.user_data['await']
         return
     
-    if await_state in ['st_wi','st_wi2','st_pi','st_qr']:
-        key = {'st_wi':'welcome_image','st_wi2':'welcome_image2','st_pi':'price_list_image','st_qr':'qr_code_path'}[await_state]
+    if await_state in ['st_wi', 'st_wi2', 'st_pi', 'st_qr']:
+        key = {
+            'st_wi': 'welcome_image',
+            'st_wi2': 'welcome_image2',
+            'st_pi': 'price_list_image',
+            'st_qr': 'qr_code_path'
+        }[await_state]
+        
         if text.lower() == 'remove':
             set_setting(key, '')
             await msg.reply_text("✅ Cleared!")
         elif text.startswith('http://') or text.startswith('https://'):
             set_setting(key, text)
-            await msg.reply_text(f"✅ URL set!")
+            await msg.reply_text("✅ URL set!")
         elif Path(text).exists():
             set_setting(key, text)
-            await msg.reply_text(f"✅ Path set!")
+            await msg.reply_text("✅ Path set!")
         else:
-            await msg.reply_text("Send photo directly or URL/path.\n`remove` to clear")
+            await msg.reply_text("Send photo directly or URL/path." + NL + "`remove` to clear")
         del context.user_data['await']
         return
     
@@ -1517,7 +1661,7 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
             [InlineKeyboardButton("✅ Exact", callback_data="rt_exact")],
             [InlineKeyboardButton("🔙 Back", callback_data="ar_rp")]
         ])
-        await msg.reply_text(f"Keyword: `{text}`\nSelect match type:", reply_markup=kb)
+        await msg.reply_text(f"Keyword: `{text}`" + NL + "Select match type:", reply_markup=kb)
         return
     
     if await_state == 'seen_delay':
@@ -1525,7 +1669,8 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
             v = max(1, min(5, int(text)))
             set_setting('seen_delay', v)
             await msg.reply_text(f"✅ Seen delay: {v}s")
-        except: await msg.reply_text("❌ Invalid!")
+        except:
+            await msg.reply_text("❌ Invalid!")
         del context.user_data['await']
         return
     
@@ -1534,7 +1679,8 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
             v = max(1, min(5, int(text)))
             set_setting('typing_duration', v)
             await msg.reply_text(f"✅ Typing: {v}s")
-        except: await msg.reply_text("❌ Invalid!")
+        except:
+            await msg.reply_text("❌ Invalid!")
         del context.user_data['await']
         return
     
@@ -1547,12 +1693,12 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if await_state == 'ac_ph':
         context.user_data['await'] = 'ac_otp'
         context.user_data['ac_phone'] = text
-        await msg.reply_text(f"📱 Phone: `{text}`\nSending code...")
+        await msg.reply_text(f"📱 Phone: `{text}`" + NL + "Sending code...")
         asyncio.create_task(send_code(text, update, context))
         return
     
     if await_state == 'ac_otp':
-        phone = context.user_data.get('ac_phone','')
+        phone = context.user_data.get('ac_phone', '')
         code = text.strip()
         asyncio.create_task(complete_login(phone, code, update, context))
         del context.user_data['await']
@@ -1571,6 +1717,24 @@ async def handle_await_input(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 
 # ═══════════════════════════════════════════
+# CALLBACK FOR REPLY TYPE
+# ═══════════════════════════════════════════
+async def callback_reply_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    if data == "rt_cont":
+        context.user_data['rt'] = 'contains'
+        await query.edit_message_text("✅ Match: **contains**" + NL + "Now send reply text:")
+        context.user_data['await'] = 'rt'
+    elif data == "rt_exact":
+        context.user_data['rt'] = 'exact'
+        await query.edit_message_text("✅ Match: **exact**" + NL + "Now send reply text:")
+        context.user_data['await'] = 'rt'
+
+
+# ═══════════════════════════════════════════
 # ACCOUNT LOGIN HELPERS
 # ═══════════════════════════════════════════
 async def send_code(phone, update, context):
@@ -1586,6 +1750,7 @@ async def send_code(phone, update, context):
     except Exception as e:
         await update.message.reply_text(f"❌ {str(e)[:80]}")
 
+
 async def complete_login(phone, code, update, context):
     try:
         client = context.user_data.get('ac_client')
@@ -1599,11 +1764,16 @@ async def complete_login(phone, code, update, context):
         ss = client.session.save()
         
         info = {
-            'id': f"acc_{int(time.time())}_{random.randint(100,999)}",
-            'user_id': me.id, 'name': me.first_name or f"User{me.id}",
-            'phone': getattr(me, 'phone', phone), 'session': ss,
-            'api_id': DEFAULT_API_ID, 'api_hash': DEFAULT_API_HASH,
-            'enabled': True, 'is_backup': False, 'proxy': None,
+            'id': f"acc_{int(time.time())}_{random.randint(100, 999)}",
+            'user_id': me.id,
+            'name': me.first_name or f"User{me.id}",
+            'phone': getattr(me, 'phone', phone),
+            'session': ss,
+            'api_id': DEFAULT_API_ID,
+            'api_hash': DEFAULT_API_HASH,
+            'enabled': True,
+            'is_backup': False,
+            'proxy': None,
             'added_at': datetime.now().isoformat()
         }
         
@@ -1615,7 +1785,7 @@ async def complete_login(phone, code, update, context):
         if c2:
             active_accounts.append(info)
             account_clients[info['id']] = c2
-            account_stats[info['id']] = {'auto_sent':0,'spam_sent':0,'running':True,'spam_running':False}
+            account_stats[info['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': True, 'spam_running': False}
             account_stop_flags[info['id']] = False
             await update.message.reply_text(f"✅ **Added!** {info['name']} ({info['phone']})")
         else:
@@ -1623,14 +1793,15 @@ async def complete_login(phone, code, update, context):
         
         await client.disconnect()
         context.user_data['await'] = None
-        context.user_data.pop('ac_client',None)
-        context.user_data.pop('ac_hash',None)
-        context.user_data.pop('ac_phone',None)
+        context.user_data.pop('ac_client', None)
+        context.user_data.pop('ac_hash', None)
+        context.user_data.pop('ac_phone', None)
     except SessionPasswordNeededError:
         context.user_data['await'] = 'ac_2fa'
         await update.message.reply_text("🔑 **2FA required!** Enter password:")
     except Exception as e:
         await update.message.reply_text(f"❌ {str(e)[:80]}")
+
 
 async def add_session_account(session_str, update, context, is_backup=False):
     try:
@@ -1641,11 +1812,16 @@ async def add_session_account(session_str, update, context, is_backup=False):
         name = me.first_name or "Unknown"
         
         info = {
-            'id': f"acc_{int(time.time())}_{random.randint(100,999)}",
-            'user_id': me.id, 'name': name, 'phone': phone,
-            'session': session_str, 'api_id': DEFAULT_API_ID,
-            'api_hash': DEFAULT_API_HASH, 'enabled': True,
-            'is_backup': is_backup, 'proxy': None,
+            'id': f"acc_{int(time.time())}_{random.randint(100, 999)}",
+            'user_id': me.id,
+            'name': name,
+            'phone': phone,
+            'session': session_str,
+            'api_id': DEFAULT_API_ID,
+            'api_hash': DEFAULT_API_HASH,
+            'enabled': True,
+            'is_backup': is_backup,
+            'proxy': None,
             'added_at': datetime.now().isoformat()
         }
         
@@ -1658,7 +1834,7 @@ async def add_session_account(session_str, update, context, is_backup=False):
             if c2:
                 active_accounts.append(info)
                 account_clients[info['id']] = c2
-                account_stats[info['id']] = {'auto_sent':0,'spam_sent':0,'running':True,'spam_running':False}
+                account_stats[info['id']] = {'auto_sent': 0, 'spam_sent': 0, 'running': True, 'spam_running': False}
                 account_stop_flags[info['id']] = False
                 await update.message.reply_text(f"✅ **Added!** {name} ({phone})")
             else:
@@ -1672,24 +1848,6 @@ async def add_session_account(session_str, update, context, is_backup=False):
 
 
 # ═══════════════════════════════════════════
-# CALLBACK FOR REPLY TYPE
-# ═══════════════════════════════════════════
-async def callback_reply_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    
-    if data == "rt_cont":
-        context.user_data['rt'] = 'contains'
-        await query.edit_message_text("✅ Match: **contains**\nNow send reply text:")
-        context.user_data['await'] = 'rt'
-    elif data == "rt_exact":
-        context.user_data['rt'] = 'exact'
-        await query.edit_message_text("✅ Match: **exact**\nNow send reply text:")
-        context.user_data['await'] = 'rt'
-
-
-# ═══════════════════════════════════════════
 # PHOTO HANDLER
 # ═══════════════════════════════════════════
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1698,7 +1856,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     await_state = context.user_data.get('await')
-    if not await_state or await_state not in ['st_wi','st_wi2','st_pi','st_qr']:
+    if not await_state or await_state not in ['st_wi', 'st_wi2', 'st_pi', 'st_qr']:
         return
     
     msg = update.message
@@ -1708,17 +1866,42 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = msg.photo[-1]
     file = await photo.get_file()
     
-    key = {'st_wi':'welcome_image','st_wi2':'welcome_image2','st_pi':'price_list_image','st_qr':'qr_code_path'}[await_state]
+    key = {
+        'st_wi': 'welcome_image',
+        'st_wi2': 'welcome_image2',
+        'st_pi': 'price_list_image',
+        'st_qr': 'qr_code_path'
+    }[await_state]
+    
     save_path = f"data/{await_state}_{int(time.time())}.jpg"
     
     try:
         await file.download_to_drive(save_path)
         set_setting(key, save_path)
-        await msg.reply_text(f"✅ Saved!")
+        await msg.reply_text("✅ Saved!")
     except Exception as e:
         await msg.reply_text(f"❌ {str(e)[:60]}")
     
     del context.user_data['await']
+
+
+# ═══════════════════════════════════════════
+# STATUS & RUNTIME TEXT (for when 'rt' is awaiting)
+# ═══════════════════════════════════════════
+async def handle_rt_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle reply text input after keyword is set"""
+    if context.user_data.get('await') == 'rt':
+        reply_text = update.message.text
+        keyword = context.user_data.get('rk', '')
+        match_type = context.user_data.get('rt', 'contains')
+        
+        if keyword and reply_text:
+            add_reply(keyword, reply_text, match_type)
+            await update.message.reply_text(f"✅ Added!" + NL + f"`{keyword}` ➜ `{reply_text[:30]}...`")
+        
+        context.user_data.pop('rk', None)
+        context.user_data.pop('rt', None)
+        del context.user_data['await']
 
 
 # ═══════════════════════════════════════════
