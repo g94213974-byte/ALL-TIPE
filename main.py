@@ -9,7 +9,7 @@ All problems solved:
 5. Group spam + Auto reply runs together
 """
 
-import os, sys, json, asyncio, random, logging, threading, time
+import os, sys, json, asyncio, random, logging, threading, time, uuid
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from collections import defaultdict
@@ -403,7 +403,51 @@ async def keep_alive_loop(acc_id, client, interval=60):
             if account_stop_flags.get(acc_id, False):
                 break
             await asyncio.sleep(1)
+# ============ MISSING ACCOUNT FUNCTIONS - ADD THESE ============
 
+def load_accounts():
+    """Load accounts from accounts.json"""
+    try:
+        if ACCOUNTS_FILE.exists() and ACCOUNTS_FILE.stat().st_size > 0:
+            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if content:
+                    data = json.loads(content)
+                    if isinstance(data, list):
+                        return {'accounts': data}
+                    return data
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning(f"Accounts file corrupt: {e}")
+    return {'accounts': []}
+
+
+def save_accounts(data):
+    """Save accounts to accounts.json"""
+    try:
+        with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save accounts: {e}")
+        return False
+
+
+def set_account_proxy(acc_id, proxy_config):
+    """Set or remove proxy for an account"""
+    data = load_accounts()
+    for acc in data.get('accounts', []):
+        if acc['id'] == acc_id:
+            if proxy_config:
+                acc['proxy'] = proxy_config
+            else:
+                acc['proxy'] = None
+            save_accounts(data)
+            for a in active_accounts:
+                if a['id'] == acc_id:
+                    a['proxy'] = proxy_config
+            return True
+    return False
+    
 async def check_account_status_periodically():
     logger.info("[CHECKER] Account status monitor started (every 10s)")
     while not shutdown_event.is_set():
