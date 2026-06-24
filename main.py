@@ -1590,6 +1590,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             txt += f"{tp}{st} {a.get('name','?')[:12]} 📱{a.get('phone','?')}" + NL
         await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
         return
+        for a in al:
+            tp = "📌M" if not a.get('is_backup') else "💾B"
+            st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
+            txt += f"{tp}{st} {a.get('name','?')[:12]} 📱{a.get('phone','?')}" + NL
+        await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+        return
+            if data == "ac_ls":
+        da = load_accounts()
+        al = da.get('accounts', [])
+        if not al:
+            await query.edit_message_text("❌ None!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+            return
+        txt = f"📋 **All ({len(al)})**" + NL + NL
+        for a in al:
+            tp = "📌M" if not a.get('is_backup') else "💾B"
+            st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
+            txt += f"{tp}{st} {a.get('name','?')[:12]} 📱{a.get('phone','?')}" + NL
+        await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+        return
     
     # ─── Settings Menu ───
     if data == "m_set":
