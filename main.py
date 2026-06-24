@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
-UNIFIED TELEGRAM BOT - COMPLETELY FIXED VERSION (v2)
+UNIFIED TELEGRAM BOT - WEB SERVICE EDITION
 Fixes:
-- Token no longer logged
-- Single auto-reply system (no duplicate handlers)
-- Proper indentation throughout
-- Typing effect ON by default
-- Polling timeout prevented
-- All Python 3.11 f-string backslash issues fixed
-- Seen delay now properly delays ReadHistory (single tick -> typing -> double tick -> reply)
-- All back buttons fixed in every menu
+- Flask health check server for Render Web Service
+- Seen delay properly delays ReadHistory (single tick -> typing -> double tick -> reply)
+- All back buttons fixed
+- 2FA support
 """
 
 import os, sys, json, asyncio, random, logging, time, uuid
@@ -1327,6 +1323,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         da = load_accounts()
         al = da.get('accounts', [])
         if not al:
+            await query.edit_message_text("❌ None!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]
+                                                                                       await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        return
+    
+    if data == "ac_bk_add":
+        context.user_data['await'] = 'ac_bk_ss'
+        await query.edit_message_text("🔑 **Backup Session:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
+        return
+    
+    if data == "ac_bk_del":
+        da = load_accounts()
+        ba = [a for a in da.get('accounts', []) if a.get('is_backup')]
+        if not ba:
+            await query.edit_message_text("❌ None!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
+            return
+        kb = [[InlineKeyboardButton(f"🗑️ {a.get('name','?')}", callback_data=f"acbkd_{a['id']}")] for a in ba]
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="ac_bk")])
+        await query.edit_message_text("🗑️ **Remove:**", reply_markup=InlineKeyboardMarkup(kb))
+        return
+    
+    if data.startswith("acbkd_"):
+        bid = data.split('_')[1]
+        da = load_accounts()
+        da['accounts'] = [a for a in da.get('accounts', []) if a['id'] != bid]
+        save_accounts(da)
+        await query.edit_message_text("✅ Removed!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ac_bk")]]))
+        return
+    
+    if data == "ac_ls":
+        da = load_accounts()
+        al = da.get('accounts', [])
+        if not al:
             await query.edit_message_text("❌ None!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
             return
         txt = f"📋 **All ({len(al)})**" + NL + NL
@@ -1543,7 +1571,229 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]])
             )
             return
-            # ═══════════════════════════════════════════
+            if data == "ac_ls":
+        da = load_accounts()
+        al = da.get('accounts', [])
+        if not al:
+            await query.edit_message_text("❌ None!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+            return
+        txt = f"📋 **All ({len(al)})**" + NL + NL
+        for a in al:
+            tp = "📌M" if not a.get('is_backup') else "💾B"
+            st = "🟢" if any(x['id'] == a['id'] for x in active_accounts) else "🔴"
+            txt += f"{tp}{st} {a.get('name','?')[:12]} 📱{a.get('phone','?')}" + NL
+        await query.edit_message_text(txt[:4000], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_acc")]]))
+        return
+    
+    # ─── Settings Menu ───
+    if data == "m_set":
+        bp = "🟢" if get_setting('block_photo_enabled',True) else "🔴"
+        dr = "🟢" if get_setting('default_reply_enabled',False) else "🔴"
+        fs = "🟢" if get_setting('flood_slow_mode',True) else "🔴"
+        ln = "🟢" if logout_notification_enabled else "🔴"
+        kb = [
+            [InlineKeyboardButton(f"🚫 Block Photo {bp}", callback_data="st_bp")],
+            [InlineKeyboardButton(f"💬 Default Reply {dr}", callback_data="st_dr")],
+            [InlineKeyboardButton(f"🐢 Flood Slow {fs}", callback_data="st_fs")],
+            [InlineKeyboardButton(f"🔔 Logout Alert {ln}", callback_data="st_ln")],
+            [InlineKeyboardButton("📝 Welcome & Price", callback_data="st_wp")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="main")]
+        ]
+        await query.edit_message_text("⚙️ **Settings**", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        return
+    
+    if data == "st_bp":
+        set_setting('block_photo_enabled', not get_setting('block_photo_enabled', True))
+        update.callback_query.data = "m_set"
+        await handle_callback(update, context)
+        return
+    
+    if data == "st_dr":
+        cur = get_setting('default_reply_enabled', False)
+        set_setting('default_reply_enabled', not cur)
+        if not cur:
+            context.user_data['await'] = 'dr_txt'
+            await query.edit_message_text("💬 **Enter default reply text:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_set")]]))
+        else:
+            update.callback_query.data = "m_set"
+            await handle_callback(update, context)
+        return
+    
+    if data == "st_fs":
+        set_setting('flood_slow_mode', not get_setting('flood_slow_mode', True))
+        update.callback_query.data = "m_set"
+        await handle_callback(update, context)
+        return
+    
+    if data == "st_ln":
+        logout_notification_enabled = not logout_notification_enabled
+        update.callback_query.data = "m_set"
+        await handle_callback(update, context)
+        return
+    
+    if data == "st_wp":
+        wm = get_setting('welcome_message', '') or "🔥 Welcome!"
+        wm2 = get_setting('welcome_message2', '') or "🛒 How to order?"
+        wi = "✅" if get_setting('welcome_image','') else "❌"
+        wi2 = "✅" if get_setting('welcome_image2','') else "❌"
+        pi = "✅" if get_setting('price_list_image','') else "❌"
+        pt = get_setting('price_list_text', "🔥 10MIN Rs.99")
+        qr = "✅" if get_setting('qr_code_path','') else "❌"
+        upi = get_setting('upi_id','') or "Not Set"
+        paytm = get_setting('paytm_num','') or "Not Set"
+        txt_parts = [
+            "📝 **W&P**",
+            f"1️⃣ `{wm[:30]}...` 🖼{wi}",
+            f"2️⃣ `{wm2[:30]}...` 🖼{wi2}",
+            f"💰 `{pt[:30]}...` 🖼{pi}",
+            f"💳 UPI:`{upi}` PayTm:`{paytm}`",
+            f"📷QR:{qr}"
+        ]
+        txt = NL.join(txt_parts)
+        kb = [
+            [InlineKeyboardButton("1️⃣ 1st Welcome", callback_data="st_wm"), InlineKeyboardButton("🖼 Pic1", callback_data="st_wi")],
+            [InlineKeyboardButton("2️⃣ 2nd Welcome", callback_data="st_wm2"), InlineKeyboardButton("🖼 Pic2", callback_data="st_wi2")],
+            [InlineKeyboardButton("💰 Price Text", callback_data="st_pt"), InlineKeyboardButton("🖼 Price Pic", callback_data="st_pi")],
+            [InlineKeyboardButton("📱 UPI", callback_data="st_upi"), InlineKeyboardButton("💳 PayTm", callback_data="st_paytm")],
+            [InlineKeyboardButton("📷 QR", callback_data="st_qr")],
+            [InlineKeyboardButton("🔙 Back", callback_data="m_set")]
+        ]
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        return
+    
+    # ─── Settings text inputs ───
+    st_text_map = {
+        'st_wm': ('welcome_message', "👋 **1st Welcome Message**"),
+        'st_wm2': ('welcome_message2', "2️⃣ **2nd Welcome Message**"),
+        'st_pt': ('price_list_text', "💰 **Set Price List Text**"),
+    }
+    if data in st_text_map:
+        key, label = st_text_map[data]
+        context.user_data['await'] = data
+        cur = get_setting(key, '')
+        txt_parts = [label, ""]
+        if cur:
+            txt_parts.append(f"Current: `{cur[:30]}...`")
+        txt_parts.append("`remove` to clear")
+        txt = NL.join(txt_parts)
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        return
+    
+    st_media_map = {
+        'st_wi': 'welcome_image',
+        'st_wi2': 'welcome_image2',
+        'st_pi': 'price_list_image',
+        'st_qr': 'qr_code_path',
+    }
+    if data in st_media_map:
+        key = st_media_map[data]
+        context.user_data['await'] = data
+        cur = get_setting(key, '')
+        txt_parts = ["🖼️ Send photo/URL/path:", ""]
+        txt_parts.append(f"Current: `{cur if cur else 'None'}`")
+        txt_parts.append("`remove` to clear")
+        txt = NL.join(txt_parts)
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        return
+    
+    st_pay_map = {
+        'st_upi': 'upi_id',
+        'st_paytm': 'paytm_num',
+    }
+    if data in st_pay_map:
+        key = st_pay_map[data]
+        context.user_data['await'] = data
+        cur = get_setting(key, '')
+        txt_parts = ["Send:", ""]
+        txt_parts.append(f"Current: `{cur if cur else 'Not Set'}`")
+        txt_parts.append("`remove` to clear")
+        txt = NL.join(txt_parts)
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="st_wp")]]))
+        return
+    
+    # ─── Status ───
+    if data == "m_stat":
+        ar = "🟢" if auto_reply_enabled else "🔴"
+        gs = "🟢" if group_spam_enabled else "🔴"
+        ln = "🟢" if logout_notification_enabled else "🔴"
+        tc = len([k for k, v in customer_count.items() if v > 0])
+        total_accs = len(load_accounts().get('accounts', []))
+        spam_running = sum(1 for a in active_accounts if account_stats.get(a['id'], {}).get('spam_running', False))
+        spam_sent = sum(account_stats.get(a['id'], {}).get('spam_sent', 0) for a in active_accounts)
+        speed = get_setting('spam_speed', 'medium')
+        
+        txt_parts = [
+            "📊 **STATUS**",
+            f"📨AR:{ar} 📯GS:{gs} 🔔LN:{ln}",
+            f"👤Total:{total_accs}",
+            f"🟢Active:{len(active_accounts)}",
+            f"🏃Spam:{spam_running}",
+            f"📤Sent:{spam_sent}",
+            f"👥Cust:{tc}",
+            f"⚡Speed:{speed}"
+        ]
+        txt = NL.join(txt_parts)
+        await query.edit_message_text(
+            txt, parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Refresh", callback_data="m_stat")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="main")]
+            ])
+        )
+        return
+    
+    # ─── Admin ───
+    if data == "m_adm":
+        txt_parts = ["🔐 **Admin**", f"👑{OWNER_ID}", f"👥{len(admins)-1}", ""]
+        for a in admins:
+            icon = "👑" if a == OWNER_ID else "👤"
+            txt_parts.append(f"{icon}`{a}`")
+        txt = NL.join(txt_parts)
+        
+        if uid == OWNER_ID:
+            kb = [
+                [InlineKeyboardButton("➕ Add", callback_data="ad_add")],
+                [InlineKeyboardButton("🗑️ Del", callback_data="ad_del")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="main")]
+            ]
+        else:
+            kb = [[InlineKeyboardButton("🏠 Menu", callback_data="main")]]
+        
+        await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        return
+    
+    if data == "ad_add" and uid == OWNER_ID:
+        context.user_data['await'] = 'ad_add'
+        await query.edit_message_text(
+            "👤 **Enter user ID:**",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]])
+        )
+        return
+    
+    if data == "ad_del" and uid == OWNER_ID:
+        if len(admins) <= 1:
+            await query.edit_message_text(
+                "❌ Only owner!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]])
+            )
+            return
+        kb = [[InlineKeyboardButton(f"🗑️ `{a}`", callback_data=f"addc_{a}")] for a in admins if a != OWNER_ID]
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="m_adm")])
+        await query.edit_message_text("Select:", reply_markup=InlineKeyboardMarkup(kb))
+        return
+    
+    if data.startswith("addc_") and uid == OWNER_ID:
+        aid = int(data.split('_')[1])
+        if aid in admins and aid != OWNER_ID:
+            admins.remove(aid)
+            await query.edit_message_text(
+                "✅ Removed!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="m_adm")]])
+            )
+            return
+
+
+# ═══════════════════════════════════════════
 # TEXT MESSAGE HANDLER
 # ═══════════════════════════════════════════
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2063,9 +2313,45 @@ async def main():
         await app.shutdown()
 
 
+# ═══════════════════════════════════════════
+# FLASK SERVER FOR RENDER WEB SERVICE
+# ═══════════════════════════════════════════
+from flask import Flask, jsonify
+import threading
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def health():
+    return jsonify({
+        "status": "running",
+        "active_accounts": len(active_accounts),
+        "auto_reply": auto_reply_enabled,
+        "group_spam": group_spam_enabled
+    })
+
+@flask_app.route('/health')
+def health_check():
+    return "OK", 200
+
+
+async def run_main():
+    await main()
+
+
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+
+
 if __name__ == "__main__":
+    # Start Flask in a separate thread for Render health check
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info(f"🌐 Flask health check running on port {PORT}")
+    
+    # Run the bot
     try:
-        asyncio.run(main())
+        asyncio.run(run_main())
     except KeyboardInterrupt:
         logger.info("👋 Bot stopped.")
     except Exception as e:
